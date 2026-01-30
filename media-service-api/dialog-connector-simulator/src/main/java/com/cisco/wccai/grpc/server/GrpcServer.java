@@ -4,6 +4,9 @@ import com.cisco.wccai.grpc.server.interceptors.AuthorizationServerInterceptor;
 import com.cisco.wccai.grpc.server.interceptors.ServiceExceptionHandler;
 import io.grpc.Server;
 import io.grpc.ServerBuilder;
+import io.grpc.protobuf.services.ProtoReflectionService;
+import lombok.Getter;
+import lombok.Setter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -16,6 +19,8 @@ public class GrpcServer {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(GrpcServer.class);
     private static final int PORT = 8086;
+    @Getter @Setter
+    private static boolean serverIsRunning;
 
     /**
      * The entry point of application.
@@ -30,16 +35,21 @@ public class GrpcServer {
                                     .intercept(new ServiceExceptionHandler())
                                     .addService(new VoiceVAImpl())
                                     .addService(new ConversationAudioForkImpl())
+                                    .addService(ProtoReflectionService.newInstance())
+                                    .addService(new com.cisco.wccai.grpc.server.HealthCheckImpl())
                                     .intercept(new AuthorizationServerInterceptor())
                                     .build()
                                     .start();
 
         LOGGER.info("server started at port : {}", PORT );
 
+        serverIsRunning = true;
+
         Runtime.getRuntime().addShutdownHook(new Thread( () -> {
             LOGGER.info("Received Shutdown Request");
             server.shutdown();
             LOGGER.info("Successfully Stopped, Shutting down the server");
+            serverIsRunning = false;
         }));
 
 
