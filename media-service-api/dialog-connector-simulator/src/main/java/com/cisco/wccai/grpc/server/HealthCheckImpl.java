@@ -13,22 +13,24 @@ public class HealthCheckImpl extends HealthGrpc.HealthImplBase {
     @Override
     public void check(HealthOuterClass.HealthCheckRequest request, StreamObserver<HealthOuterClass.HealthCheckResponse> responseObserver) {
         LOGGER.info("Health check request received for service: {}", request.getService());
-        if ( request.getService().equals("ping") || request.getService().equals("status") ) {
-
-            HealthOuterClass.HealthCheckResponse hcresp_serving = HealthOuterClass.HealthCheckResponse.newBuilder().setStatus(HealthOuterClass.HealthCheckResponse.ServingStatus.SERVING).build();
-            HealthOuterClass.HealthCheckResponse hcresp_not_serving = HealthOuterClass.HealthCheckResponse.newBuilder().setStatus(HealthOuterClass.HealthCheckResponse.ServingStatus.NOT_SERVING).build();
-
-            if ( GrpcServer.isServerIsRunning() ) {
-                responseObserver.onNext(hcresp_serving);
-                LOGGER.info("Health check response sent: SERVING");
-            } else {
-                responseObserver.onNext(hcresp_not_serving);
-                LOGGER.info("Health check response sent: NOT_SERVING");
-            }
-
-            responseObserver.onCompleted();
-
+        
+        // Always respond to health checks, regardless of service field
+        HealthOuterClass.HealthCheckResponse.ServingStatus status;
+        
+        if (GrpcServer.isServerIsRunning()) {
+            status = HealthOuterClass.HealthCheckResponse.ServingStatus.SERVING;
+            LOGGER.info("Health check response sent: SERVING");
+        } else {
+            status = HealthOuterClass.HealthCheckResponse.ServingStatus.NOT_SERVING;
+            LOGGER.info("Health check response sent: NOT_SERVING");
         }
+        
+        HealthOuterClass.HealthCheckResponse response = HealthOuterClass.HealthCheckResponse.newBuilder()
+                .setStatus(status)
+                .build();
+        
+        responseObserver.onNext(response);
+        responseObserver.onCompleted();
     }
 
 
