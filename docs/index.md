@@ -290,13 +290,25 @@ The **Dialog Connector Simulator** is a sample gRPC server that:
 
 ### Step 1: Clone the Sample Code
 
+> **Important:** This guide uses an enhanced fork of the simulator with additional features including environment variable support for DATASOURCE_URL, improved audio storage, and updated authentication. These enhancements are pending merge to the official repository.
+
 ```bash
-# Clone the repository
-git clone https://github.com/CiscoDevNet/webex-contact-center-provider-sample-code.git
+# Clone the enhanced repository
+git clone https://github.com/ralfschiffert/webex-contact-center-provider-sample-code.git
 
 # Navigate to the simulator directory
 cd webex-contact-center-provider-sample-code/media-service-api/dialog-connector-simulator
 ```
+
+**What's Enhanced in This Fork:**
+- Environment variable support for `DATASOURCE_URL` (critical for Cloud Run deployments)
+- Updated Media Forking schema UUID
+- Improved audio file storage to Google Cloud Storage
+- Enhanced health check implementation
+- PORT configuration flexibility
+- Complete documentation and deployment guides
+
+> **Note:** Once these changes are merged into the official [CiscoDevNet repository](https://github.com/CiscoDevNet/webex-contact-center-provider-sample-code), you can clone from there instead.
 
 ### Step 2: Understand the Project Structure
 
@@ -2254,9 +2266,12 @@ Explore advanced capabilities:
 
 ### Sample Code
 
-- **GitHub Repository:** https://github.com/CiscoDevNet/webex-contact-center-provider-sample-code
+- **Enhanced Fork (Recommended):** https://github.com/ralfschiffert/webex-contact-center-provider-sample-code
+- **Official Repository:** https://github.com/CiscoDevNet/webex-contact-center-provider-sample-code
 - **Dialog Connector Simulator:** `/media-service-api/dialog-connector-simulator`
 - **Protocol Definitions:** `/media-service-api/dialog-connector-simulator/src/main/proto`
+
+> **Note:** The enhanced fork includes production-ready features for environment variable configuration, improved audio storage, and complete deployment documentation. Use this fork until the enhancements are merged into the official repository.
 
 ### Getting Help
 
