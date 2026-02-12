@@ -1,5 +1,7 @@
 # Getting Started with Media Forking for Webex Contact Center
 
+> **Note:** This guide uses `<REPO_ROOT>` to represent the directory where you cloned the repository. Replace this with your actual path (e.g., `/home/user/projects` or `C:\Users\username\projects`).
+
 **Feature:** Real-Time Media Streaming for Customer-Agent Conversations  
 **Last Updated:** January 7, 2026  
 **Audience:** Developers and Partners
@@ -44,6 +46,7 @@ Media Forking allows you to "tap into" live customer-agent voice conversations i
 
 1. **Inbound Call:** A customer calls your contact center
 2. **IVR Interaction:** The call is routed to an IVR (Interactive Voice Response) system for self-service
+   > **Note:** WXCC also offers BYOVA (Bring Your Own Virtual Agent), another gRPC-based solution that allows integration with custom virtual agents at this step of the journey
 3. **Agent Escalation:** If the IVR cannot resolve the issue, the customer requests to speak with an agent
 4. **Media Forking Trigger:** When the customer connects to an agent, the media forking activity in the flow is triggered
 5. **Real-Time Streaming:** Audio from both the customer and agent is streamed to your registered data source endpoint
@@ -53,6 +56,7 @@ Media Forking allows you to "tap into" live customer-agent voice conversations i
 - Media forking is **only triggered when a customer connects to a live agent**
 - It does **not** capture IVR interactions or pre-agent audio
 - This is a **paid feature** that must be enabled through Cisco's CCW (Commerce Workspace) ordering tool
+  > **Development Note:** Trial access during development is available but requires custom enablement by the WXCC team
 - Audio is streamed in real-time with minimal latency
 
 ### What You Receive
@@ -87,10 +91,14 @@ Analyze customer emotions and sentiment during the call to help agents adjust th
 
 ### 5. Conversation Intelligence
 - Extract key insights from conversations (customer intent, pain points, product mentions)
-- Build analytics dashboards with conversation data
-- Identify training opportunities for agents
 
-### 6. Compliance & Recording
+### 6. Voice Biometrics & Voice Printing
+- Authenticate customers through their unique voice patterns
+- Create voice prints for fraud detection and prevention
+- Reduce authentication time by identifying returning callers
+- Enhance security with passive, non-intrusive authentication
+
+### 7. Compliance & Recording
 - Record conversations for regulatory compliance
 - Detect sensitive information (PCI, PII) and trigger security protocols
 - Maintain audit trails
@@ -220,6 +228,7 @@ Before you begin, ensure you have:
 
 **For Partners/Developers:**
 - [ ] **Development/Testing:** Use a Webex sandbox or your own licensed WXCC organization for development and testing
+  - **Trial Access:** During EA phase or development, partners can request a trial environment instead of purchasing production licenses
 - [ ] **Customer Licensing:** Your customers will need their own media forking subscriptions ordered through a Cisco partner
 
 ### 2. Technical Requirements
@@ -229,13 +238,29 @@ Before you begin, ensure you have:
 - [ ] **Firewall Rules:** Appropriate firewall rules to allow incoming gRPC connections
 
 ### 3. Development Environment
-- [ ] **Java 17 or higher** (for running the simulator)
-  - **Recommended:** Java 17 for best compatibility
+
+#### For Sample Simulator
+The following requirements apply **only** if you plan to build and run the provided sample simulator:
+
+- [ ] **Java 17 (Required for simulator)**
+  - **Critical:** The simulator requires Java 17 for both building and running
+  - Maven must use Java 17 even if newer versions are installed
+  - **IMPORTANT:** Maven might use a different Java version than your system default
+  - To ensure Maven uses Java 17: `export JAVA_HOME=$(/usr/libexec/java_home -v 17)`
+  - Verify Maven's Java with: `mvn -version` (should report using Java 17, not Java 25+)
   - The project is compiled to Java 17 bytecode (maven.compiler.source/target=17)
   - Lombok 1.18.32 and other dependencies support Java 17-22
 - [ ] **Maven** (for building the simulator)
 - [ ] **Git** (for cloning the sample code repository)
 - [ ] **Docker** (optional, for containerized deployment)
+
+#### For Custom Implementation
+If you're building your own gRPC server implementation from scratch:
+
+- [ ] **Any Programming Language:** You can implement a gRPC server in any language with gRPC support (Java, C#, Go, Node.js, Python, etc.)
+- [ ] **gRPC Framework:** Must support gRPC protocol buffers v3
+- [ ] **JWT Validation Library:** For validating JWS tokens from WXCC
+- [ ] **Audio Processing Library:** For your specific audio processing needs
 
 ### 4. Audio Processing Capabilities
 - **Supported Audio Format:** WAV
@@ -314,7 +339,9 @@ dialog-connector-simulator/
 ### Step 3: Build the Simulator
 
 ```bash
-# Compile Protocol Buffer definitions
+# Ensure Maven uses Java 17 (critical for Apple Silicon/ARM Macs)
+export JAVA_HOME=$(/usr/libexec/java_home -v 17)
+
 mvn clean compile
 
 # Build the application
@@ -348,29 +375,11 @@ API_URL=localhost
 # Port (TLS - 443, NonTLS - 31400, Google Cloud - 8086)
 PORT=8086
 
-# Language code
-LANGUAGE_CODE=en-US
-
-# Flag to set for TLS
-USE_TLS=false
-
 # Audio encoding supported types - LINEAR16, MULAW
 AUDIO_ENCODING_TYPE=MULAW
 
-# Sample rate
-SAMPLE_RATE_HERTZ=8000
-
-# Buffer Size
-BUFFER_SIZE=8192
-
-# Org Id
-ORG_ID=org_01
-
-# Prompt duration
-PROMPT_DURATION_MS=10000
-
-# Audio duration
-AUDIO_DURATION_MS=60000
+# Datasource URL for JWT validation
+DATASOURCE_URL=https://dialog-connector-simulator.intgus1.ciscoccservice.com:443
 ```
 
 **Key Configuration Options:**
@@ -378,14 +387,23 @@ AUDIO_DURATION_MS=60000
   - Can be configured via `config.properties` file
   - Can be overridden with PORT environment variable
   - **Configuration Priority:** Environment variable > config.properties > hardcoded default (8086)
-  - **Important:** After changing PORT in config.properties, you must rebuild: `mvn clean install`
-- **USE_TLS:** Set to `true` for production, `false` for local testing
-- **AUDIO_ENCODING_TYPE:** LINEAR16 or MULAW (must match incoming stream)
-- **SAMPLE_RATE_HERTZ:** 8000 or 16000 Hz
+  - **Note:** When running locally with `mvn exec:java`, changes to `config.properties` are applied immediately. When building for deployment (Docker/JAR), configuration changes require rebuilding.
+- **API_URL:** The endpoint hostname to connect to (default: `localhost`)
+- **AUDIO_ENCODING_TYPE:** Audio encoding format for processing (options: `LINEAR16`, `MULAW`)
+- **DATASOURCE_URL:** URL used for JWT token validation - must match the URL registered in your data source
+  - Can be configured via `config.properties` file
+  - Can be overridden with DATASOURCE_URL environment variable
+  - **Configuration Priority:** Environment variable > config.properties > hardcoded default
+  - **Important:** This URL must exactly match the `url` field in your data source registration (Step 5 in Webex Configuration)
+  - For Google Cloud Run deployments, set this as an environment variable to match your Cloud Run service URL
+  - For local development with ngrok, set this to your ngrok URL
 
 ### Step 5: Run the Simulator Locally
 
 ```bash
+# Ensure Maven uses Java 17 (critical for Apple Silicon/ARM Macs)
+export JAVA_HOME=$(/usr/libexec/java_home -v 17)
+
 # Run the gRPC server
 mvn exec:java -Dexec.mainClass="com.cisco.wccai.grpc.server.GrpcServer"
 ```
@@ -440,6 +458,129 @@ lsof -i :8086
 kill <PID>
 ```
 
+## IntelliJ IDEA Setup
+
+For active development, IntelliJ IDEA provides a powerful environment for working with the Media Forking simulator.
+
+### Prerequisites
+
+- **IntelliJ IDEA:** Download from [JetBrains](https://www.jetbrains.com/idea/download/) (Community or Ultimate edition)
+- **Java 17 JDK:** Java 17 is recommended (Java 18-22 also supported but Java 17 provides best compatibility)
+- **Maven:** IntelliJ has built-in Maven support
+
+### Import Project
+
+1. **Open IntelliJ IDEA**
+2. **Select Open** from the welcome screen (or File → Open)
+3. **Navigate to and select the simulator directory specifically**:
+   ```
+   <REPO_ROOT>/webex-contact-center-provider-sample-code/media-service-api/dialog-connector-simulator
+   ```
+   > **IMPORTANT:** Make sure to select the `dialog-connector-simulator` subdirectory, not the root repository directory
+
+4. **Select "Open as Project"** when prompted
+5. **Wait for Maven import** to complete (visible in the status bar)
+   - IntelliJ will detect the `pom.xml` file
+   - Click **"Import Maven Projects"** in the notification that appears
+   - If Maven import doesn't start automatically, right-click on `pom.xml` and select Maven → Reload Project
+   - Wait for Maven to download dependencies (this may take a few minutes)
+
+### Configure Java SDK
+
+1. Go to **File → Project Structure → Project** (or press `Cmd + ;` on Mac)
+2. Set **SDK** to Java 17
+   - Recommended: Microsoft OpenJDK 17 or Oracle JDK 17
+   - Compatible: Java 17-22 (17 recommended for best compatibility)
+3. Set **Language level** to 17 (project compiles to Java 17 bytecode)
+4. Click **Apply** and **OK**
+
+### Generate Protocol Buffer Classes
+
+Before running the application, generate Java classes from `.proto` files:
+
+1. **Open Maven Tool Window:**
+   - Click **View → Tool Windows → Maven** (or press `Cmd + 1` then select Maven)
+2. **Run Maven Goals:**
+   - Expand **dialog-connector-simulator → Lifecycle**
+   - Double-click **clean**
+   - Double-click **compile**
+3. **Verify Generated Classes:**
+   - Check `target/generated-sources/protobuf/java/` for generated files
+   - IntelliJ should automatically mark this as a source folder (blue folder icon)
+
+### Create Local Run Configuration
+
+1. Click **Run → Edit Configurations...**
+2. Click the **+** button and select **Application**
+3. Configure as follows:
+   - **Name:** `Media Forking Simulator` (or `GrpcServer`)
+   - **Main class:** `com.cisco.wccai.grpc.server.GrpcServer`
+   - **JRE:** Select Java 17
+   - **VM options:** `-Xmx512m` (optional, for memory allocation)
+   - **Working directory:** `$MODULE_WORKING_DIR$` (or leave as default)
+   - **Use classpath of module:** `dialog-connector-simulator`
+   - **Environment variables:** (Optional) Add `GCS_BUCKET_NAME=localaudio` to enable audio storage
+4. Click **Apply** and **OK**
+
+### Running in IntelliJ
+
+1. Click the green **Run** button (▶️) in the toolbar (or press `Ctrl + R` on Mac / `Shift + F10` on Windows/Linux)
+2. The server will start on port 8086
+3. Expected console output:
+   ```
+   INFO: Starting gRPC Server...
+   INFO: server started at port : 8086
+   INFO: Initializing the context
+   INFO: Health service registered
+   INFO: ConversationAudioFork service registered
+   ```
+
+4. **Test Locally:**
+   ```bash
+   # In a terminal, test the health endpoint
+   grpcurl -plaintext localhost:8086 com.cisco.wcc.ccai.v1.Health/Check
+   ```
+
+### Debug Mode
+
+To debug the simulator:
+
+1. **Set Breakpoints:**
+   - Open `ConversationAudioForkServiceImpl.java`
+   - Click in the left gutter next to line numbers to set breakpoints
+   - Recommended breakpoints:
+     - `onNext()` method (when audio chunks arrive)
+     - `onCompleted()` method (when stream ends)
+
+2. **Start Debug Session:**
+   - Click the **Debug** button (🐛) instead of Run
+   - Or press `Ctrl + D` (Mac) / `Shift + F9` (Windows/Linux)
+
+3. **Inspect Variables:**
+   - When breakpoint hits, inspect audio data, conversation IDs, etc.
+   - Use **Evaluate Expression** (`Alt + F8`) to test code snippets
+
+### Troubleshooting IntelliJ Setup
+
+#### Maven Import Issues
+If Maven import fails or dependencies aren't recognized:
+
+1. **Check Java version**: Ensure Maven uses Java 17
+   ```bash
+   export JAVA_HOME=$(/usr/libexec/java_home -v 17)
+   mvn -version
+   ```
+   Maven should report using Java 17, not a newer version like Java 25
+
+2. **Clear caches**: File → Invalidate Caches / Restart
+
+#### Project Structure Issues
+If you see many red underlines in the code:
+
+1. Verify you opened the correct subdirectory: `dialog-connector-simulator`
+2. Check Project Structure (File → Project Structure) has Java 17 selected
+3. Rebuild project: Build → Rebuild Project
+
 ### Step 6: Deploy to a Public Endpoint
 
 For WXCC to connect to your simulator, it must be publicly accessible. Before deploying to the cloud, it's recommended to test your Docker container locally.
@@ -458,7 +599,10 @@ If you're actively developing in IntelliJ, build the JAR locally first for faste
 
 ```bash
 # Navigate to the project directory
-cd /Users/raschiff/coding/forking/webex-contact-center-provider-sample-code/media-service-api/dialog-connector-simulator
+cd <REPO_ROOT>/webex-contact-center-provider-sample-code/media-service-api/dialog-connector-simulator
+
+# Ensure Maven uses Java 17 (critical for Apple Silicon/ARM Macs)
+export JAVA_HOME=$(/usr/libexec/java_home -v 17)
 
 # Build the JAR in IntelliJ or via Maven
 mvn clean install
@@ -484,7 +628,7 @@ Use the standard Dockerfile that compiles everything inside the container:
 
 ```bash
 # Navigate to the project directory
-cd /Users/raschiff/coding/forking/webex-contact-center-provider-sample-code/media-service-api/dialog-connector-simulator
+cd <REPO_ROOT>/webex-contact-center-provider-sample-code/media-service-api/dialog-connector-simulator
 
 # Build Docker image (compiles inside container)
 docker build -t media-forking-simulator:local .
@@ -580,6 +724,8 @@ If you have a Docker run configuration in IntelliJ:
 
 Once you've verified the Docker container works locally, deploy it to a public endpoint.
 
+> **Note:** This guide covers command-line deployment using `gcloud` CLI. IntelliJ IDEA Cloud Code plugin deployment will be covered in a future update once configuration issues are resolved.
+
 **Option A: Deploy to Google Cloud Run (Recommended for Testing)**
 
 Google Cloud Run is ideal for testing because it's serverless, scales automatically, and has a generous free tier.
@@ -596,7 +742,7 @@ The base image needs to support multiple platforms. Use Docker buildx for multi-
 
 ```bash
 # Navigate to project directory
-cd /Users/raschiff/coding/forking/webex-contact-center-provider-sample-code/media-service-api/dialog-connector-simulator
+cd <REPO_ROOT>/webex-contact-center-provider-sample-code/media-service-api/dialog-connector-simulator
 
 # Enable buildx (if not already enabled)
 docker buildx create --use
@@ -612,7 +758,7 @@ docker buildx build --platform linux/amd64 \
 
 ```bash
 # Navigate to project directory
-cd /Users/raschiff/coding/forking/webex-contact-center-provider-sample-code/media-service-api/dialog-connector-simulator
+cd <REPO_ROOT>/webex-contact-center-provider-sample-code/media-service-api/dialog-connector-simulator
 
 # Build Docker image (compiles inside container)
 docker build -t gcr.io/YOUR_PROJECT_ID/media-forking-simulator:v1 .
@@ -632,7 +778,16 @@ gcloud run deploy media-forking-simulator \
   --port 8086 \
   --memory 512Mi \
   --cpu 1 \
-  --max-instances 10
+  --max-instances 10 \
+  --set-env-vars DATASOURCE_URL=https://media-forking-simulator-abc123-uc.a.run.app
+```
+
+**Important:** Replace `https://media-forking-simulator-abc123-uc.a.run.app` with your actual Cloud Run service URL after the first deployment. You can update the environment variable later using:
+
+```bash
+gcloud run services update media-forking-simulator \
+  --region us-central1 \
+  --set-env-vars DATASOURCE_URL=https://your-actual-service-url.run.app
 ```
 
 **Expected Output:**
@@ -646,7 +801,9 @@ Service [media-forking-simulator] revision [media-forking-simulator-00001-abc] h
 Service URL: https://media-forking-simulator-abc123-uc.a.run.app
 ```
 
-**Save the Service URL** - you'll need it for WXCC configuration.
+**Save the Service URL** - you'll need it for:
+1. WXCC data source registration (Step 5 in Webex Configuration)
+2. Setting the DATASOURCE_URL environment variable (must match exactly)
 
 **View Logs:**
 ```bash
@@ -691,7 +848,7 @@ ngrok tcp 8086
 - Ensure the endpoint is publicly accessible
 - Configure appropriate security groups and firewall rules
 
-### Step 7: Verify the Simulator is Running
+### Step 6: Verify the Simulator is Running
 
 Test the health endpoint to confirm your deployment is working.
 
@@ -827,8 +984,11 @@ aplay CONVERSATION_ID-ROLE_ID.wav
 # Cloud Run
 gcloud run services logs read media-forking-simulator --region us-central1 | grep -i "audio"
 
-# Local
-# Look for "Saved audio file" or "Audio storage is ENABLED" in console output
+# Look for:
+# - "Token validation successful" (good)
+# - "Token validation failed" (bad)
+# - "JWT token is expired" (token expired)
+# - "Claims validation failed" (URL or schema mismatch)
 ```
 
 **Verify configuration:**
@@ -982,7 +1142,7 @@ This allows you to test the health endpoint without tokens.
 ```bash
 # This will fail with UNAUTHENTICATED error
 grpcurl media-forking-simulator-908846715353.us-central1.run.app:443 \
-  com.cisco.wcc.ccai.media.v1.ConversationAudio/streamConversationAudio
+  com.cisco.wcc.ccai.media.v1.ConversationAudio/StreamConversationAudio
 ```
 
 **Expected error:**
@@ -1023,7 +1183,9 @@ gcloud run services logs read media-forking-simulator --region us-central1 | gre
 
 2. **Token expired**
    - JWS tokens have expiration timestamps
-   - **Solution:** WXCC should automatically refresh tokens; check your data source registration
+   - **Solution:** You must update your data source registration with a new nonce and expiration **before** the current token expires
+   - WXCC uses the nonce and expiration from your data source registration to construct JWS tokens
+   - Best practice: Refresh every 12 hours (minimum 1 hour, maximum 24 hours)
 
 3. **Invalid issuer**
    - Token from unexpected source
@@ -1081,339 +1243,6 @@ Should return `{"status": "SERVING"}` without any token.
 **Dependencies:**
 - `nimbus-jose-jwt` - JWT parsing and validation
 - `jackson-databind` - JSON parsing
-
----
-
-## Setting Up IntelliJ IDEA for Development
-
-If you're using IntelliJ IDEA (recommended for Java development), follow these steps to set up your development environment.
-
-### Prerequisites
-
-- **IntelliJ IDEA:** Download from [JetBrains](https://www.jetbrains.com/idea/download/) (Community or Ultimate edition)
-- **Java 17 JDK:** Java 17 is recommended (Java 18-22 also supported but Java 17 provides best compatibility)
-- **Maven:** IntelliJ has built-in Maven support
-- **Google Cloud Code Plugin:** For Google Cloud integration
-
-### Step 1: Open the Project in IntelliJ
-
-1. **Launch IntelliJ IDEA**
-2. **Open Project:**
-   - Click **File → Open**
-   - Navigate to: `/Users/raschiff/coding/forking/webex-contact-center-provider-sample-code/media-service-api/dialog-connector-simulator`
-   - Click **OK**
-
-3. **Import as Maven Project:**
-   - IntelliJ will detect the `pom.xml` file
-   - Click **"Import Maven Projects"** in the notification that appears
-   - Wait for Maven to download dependencies (this may take a few minutes)
-
-### Step 2: Configure Java SDK
-
-1. **Open Project Structure:**
-   - Click **File → Project Structure** (or press `Cmd + ;` on Mac)
-2. **Set Project SDK:**
-   - Under **Project Settings → Project**
-   - Set **SDK:** to Java 17 (recommended) or Java 18-22
-   - Set **Language Level:** to 17 (project compiles to Java 17 bytecode)
-3. **Click Apply and OK**
-
-**Note:** While Java 18-22 are supported, Java 17 is recommended for best compatibility with all dependencies.
-
-### Step 3: Generate Protocol Buffer Classes
-
-Before running the application, generate Java classes from `.proto` files:
-
-1. **Open Maven Tool Window:**
-   - Click **View → Tool Windows → Maven** (or press `Cmd + 1` then select Maven)
-2. **Run Maven Goals:**
-   - Expand **dialog-connector-simulator → Lifecycle**
-   - Double-click **clean**
-   - Double-click **compile**
-3. **Verify Generated Classes:**
-   - Check `target/generated-sources/protobuf/java/` for generated files
-   - IntelliJ should automatically mark this as a source folder (blue folder icon)
-
-### Step 4: Configure Run Configuration
-
-1. **Create Run Configuration:**
-   - Click **Run → Edit Configurations**
-   - Click **+** (Add New Configuration) → **Application**
-2. **Configure:**
-   - **Name:** `Media Forking Simulator`
-   - **Main class:** `com.cisco.wccai.grpc.server.GrpcServer`
-   - **VM options:** `-Xmx512m` (optional, for memory allocation)
-   - **Working directory:** `$MODULE_WORKING_DIR$`
-   - **Use classpath of module:** `dialog-connector-simulator`
-3. **Click Apply and OK**
-
-### Step 5: Run the Simulator from IntelliJ
-
-1. **Start the Server:**
-   - Click the green **Run** button (▶️) in the toolbar
-   - Or press `Ctrl + R` (Mac) / `Shift + F10` (Windows/Linux)
-
-2. **Check Console Output:**
-   ```
-   INFO: Starting gRPC Server...
-   INFO: Server started, listening on port 8086
-   INFO: Health service registered
-   INFO: ConversationAudioFork service registered
-   ```
-
-3. **Test Locally:**
-   ```bash
-   # In a terminal, test the health endpoint
-   grpcurl -plaintext localhost:8086 com.cisco.wcc.ccai.v1.Health/Check
-   ```
-
-### Step 6: Debug Mode
-
-To debug the simulator:
-
-1. **Set Breakpoints:**
-   - Open `ConversationAudioForkServiceImpl.java`
-   - Click in the left gutter next to line numbers to set breakpoints
-   - Recommended breakpoints:
-     - `onNext()` method (when audio chunks arrive)
-     - `onCompleted()` method (when stream ends)
-
-2. **Start Debug Session:**
-   - Click the **Debug** button (🐛) instead of Run
-   - Or press `Ctrl + D` (Mac) / `Shift + F9` (Windows/Linux)
-
-3. **Inspect Variables:**
-   - When breakpoint hits, inspect audio data, conversation IDs, etc.
-   - Use **Evaluate Expression** (`Alt + F8`) to test code snippets
-
----
-
-## Deploying to Google Cloud from IntelliJ
-
-Deploy your simulator to Google Cloud Run directly from IntelliJ for easy testing and production deployment.
-
-### Prerequisites
-
-- **Google Cloud Account:** Sign up at [cloud.google.com](https://cloud.google.com)
-- **Google Cloud Project:** Create a project in Google Cloud Console
-- **Billing Enabled:** Cloud Run requires billing to be enabled
-- **Cloud Code Plugin:** Install in IntelliJ
-
-### Step 1: Install Google Cloud Code Plugin
-
-1. **Open Plugin Settings:**
-   - Click **IntelliJ IDEA → Preferences** (Mac) or **File → Settings** (Windows/Linux)
-   - Navigate to **Plugins**
-2. **Search and Install:**
-   - Search for **"Cloud Code"**
-   - Click **Install**
-   - Restart IntelliJ when prompted
-
-### Step 2: Authenticate with Google Cloud
-
-1. **Open Cloud Code:**
-   - Click **Tools → Cloud Code → Sign In to Google Cloud**
-2. **Login:**
-   - Browser will open for authentication
-   - Sign in with your Google account
-   - Grant permissions
-3. **Select Project:**
-   - In IntelliJ, click **Cloud Code** in the toolbar
-   - Select your Google Cloud project from the dropdown
-
-### Step 3: Configure Dockerfile
-
-The project already includes a Dockerfile optimized for Google Cloud:
-
-```dockerfile
-FROM google/cloud-sdk
-
-RUN mkdir /app
-COPY target/dialog-connector-simulator-1.0.0-SNAPSHOT-allinone.jar /app
-WORKDIR /app
-
-EXPOSE 8086
-
-CMD ["java", "-jar", "/app/dialog-connector-simulator-1.0.0-SNAPSHOT-allinone.jar"]
-```
-
-**Key Points:**
-- Uses `google/cloud-sdk` base image for Google Cloud integration
-- Exposes port 8086 (gRPC server port)
-- Runs the all-in-one JAR file
-
-### Step 4: Build and Deploy to Cloud Run
-
-#### Option A: Using Cloud Code Plugin (Recommended)
-
-1. **Open Run/Debug Configurations:**
-   - Click **Run → Edit Configurations**
-   - Click **+** → **Cloud Run: Deploy**
-
-2. **Configure Deployment:**
-   - **Name:** `Deploy to Cloud Run`
-   - **Project:** Select your Google Cloud project
-   - **Region:** Choose region (e.g., `us-central1`)
-   - **Service name:** `media-forking-simulator`
-   - **Dockerfile:** Select `Dockerfile` in project root
-   - **Build settings:**
-     - **Builder:** Cloud Build
-     - **Image:** `gcr.io/YOUR_PROJECT_ID/media-forking-simulator`
-
-3. **Advanced Settings:**
-   - **Port:** 8086
-   - **Memory:** 512 MiB (adjust based on needs)
-   - **CPU:** 1
-   - **Max instances:** 10 (adjust for scale)
-   - **Allow unauthenticated:** ✅ (for WXCC to connect)
-
-4. **Deploy:**
-   - Click **Run** (▶️) button
-   - IntelliJ will:
-     1. Build the JAR file
-     2. Build Docker image
-     3. Push to Google Container Registry
-     4. Deploy to Cloud Run
-   - Watch progress in the **Run** tool window
-
-5. **Get Service URL:**
-   - After deployment completes, copy the service URL
-   - Format: `https://media-forking-simulator-abc123-uc.a.run.app`
-   - **Important:** This is your public endpoint for WXCC configuration
-
-#### Option B: Using gcloud CLI
-
-Alternatively, deploy using command line:
-
-```bash
-# Navigate to project directory
-cd /Users/raschiff/coding/forking/webex-contact-center-provider-sample-code/media-service-api/dialog-connector-simulator
-
-# Build the JAR
-mvn clean install
-
-# Build and push Docker image
-gcloud builds submit --tag gcr.io/YOUR_PROJECT_ID/media-forking-simulator
-
-# Deploy to Cloud Run
-gcloud run deploy media-forking-simulator \
-  --image gcr.io/YOUR_PROJECT_ID/media-forking-simulator \
-  --platform managed \
-  --region us-central1 \
-  --allow-unauthenticated \
-  --port 8086 \
-  --memory 512Mi \
-  --max-instances 10
-```
-
-### Step 5: Configure Environment Variables (Optional)
-
-If your simulator needs configuration:
-
-1. **In Cloud Code Deployment:**
-   - In deployment configuration, add **Environment Variables**
-   - Example:
-     ```
-     LOG_LEVEL=DEBUG
-     AUDIO_STORAGE_BUCKET=gs://your-bucket-name
-     ```
-
-2. **Via gcloud CLI:**
-   ```bash
-   gcloud run services update media-forking-simulator \
-     --set-env-vars LOG_LEVEL=DEBUG,AUDIO_STORAGE_BUCKET=gs://your-bucket-name
-   ```
-
-### Step 6: Monitor and View Logs
-
-#### From IntelliJ:
-
-1. **Open Cloud Code:**
-   - Click **Tools → Cloud Code → Cloud Run → View Logs**
-2. **Select Service:**
-   - Choose `media-forking-simulator`
-3. **View Real-Time Logs:**
-   - Logs appear in the tool window
-   - Filter by severity (INFO, WARNING, ERROR)
-
-#### From Google Cloud Console:
-
-1. **Navigate to:** [Cloud Run Console](https://console.cloud.google.com/run)
-2. **Click your service:** `media-forking-simulator`
-3. **Click "LOGS" tab**
-4. **View logs in real-time**
-
-### Step 7: Test the Deployed Service
-
-```bash
-# Test health endpoint
-grpcurl YOUR_SERVICE_URL:443 com.cisco.wcc.ccai.v1.Health/Check
-
-# Example:
-grpcurl media-forking-simulator-abc123-uc.a.run.app:443 com.cisco.wcc.ccai.v1.Health/Check
-```
-
-**Expected Response:**
-```json
-{
-  "status": "SERVING"
-}
-```
-
-### Step 8: Update and Redeploy
-
-When you make code changes:
-
-1. **Make Changes** in IntelliJ
-2. **Test Locally** using the Run configuration
-3. **Redeploy:**
-   - Click **Run → Run 'Deploy to Cloud Run'**
-   - Or use the green Run button with the Cloud Run configuration selected
-4. **Cloud Code automatically:**
-   - Rebuilds the JAR
-   - Rebuilds the Docker image
-   - Deploys the new version
-   - Routes traffic to the new version
-
-### Troubleshooting Google Cloud Deployment
-
-#### Issue: Build Fails
-
-```bash
-# Check Maven build locally first
-mvn clean install
-
-# If successful locally, check Cloud Build logs
-gcloud builds list --limit 5
-gcloud builds log BUILD_ID
-```
-
-#### Issue: Service Won't Start
-
-```bash
-# Check service status
-gcloud run services describe media-forking-simulator --region us-central1
-
-# View recent logs
-gcloud run services logs read media-forking-simulator --region us-central1 --limit 50
-```
-
-#### Issue: Port Mismatch
-
-- Ensure Dockerfile `EXPOSE` matches the port in your Java code (8086)
-- Ensure Cloud Run deployment uses `--port 8086`
-- Check that `GrpcServer.java` binds to the correct port
-
-#### Issue: Authentication Errors
-
-```bash
-# Re-authenticate
-gcloud auth login
-gcloud auth application-default login
-
-# Set project
-gcloud config set project YOUR_PROJECT_ID
-```
 
 ---
 
@@ -1503,11 +1332,91 @@ gcloud alpha monitoring policies create \
 
 ## Step-by-Step Setup Guide
 
-Now that you have the simulator running, let's configure WXCC to send media streams to your endpoint.
+### Overview: What We've Built and What Comes Next
 
-### Step 1: Create a Service App
+In the previous sections, you've successfully set up and deployed the Media Forking simulator. Here's what you've accomplished:
+
+**✅ Simulator Setup Complete:**
+- Built and tested the gRPC server locally
+- Deployed the simulator to a publicly accessible endpoint (Google Cloud Run, ngrok, or your own infrastructure)
+- Verified the health endpoint is responding
+- Confirmed authentication is working (rejecting requests without valid tokens)
+
+**How the Simulator Works:**
+
+The simulator acts as a **media sink** that receives real-time audio streams from Webex Contact Center during active calls. Here's the flow:
+
+1. **WXCC Initiates Connection:** When a call enters a flow with media forking enabled, WXCC's Orchestrator establishes a bidirectional gRPC stream to your simulator endpoint
+2. **Authentication:** WXCC includes a JWS (JSON Web Signature) token that your simulator validates against Webex's public keys
+3. **Audio Streaming:** WXCC sends audio chunks in real-time as the conversation progresses
+4. **Storage:** The simulator saves the audio to WAV files (locally or in Google Cloud Storage)
+5. **Response:** Your simulator can send responses back (though the current implementation focuses on receiving and storing audio)
+
+**What's Next: WXCC Configuration**
+
+Now that your simulator is ready to receive media streams, you need to configure Webex Contact Center to send audio to your endpoint. This involves several steps:
+
+1. **Create a Service App** - Register your application with Webex
+2. **Authorize the Service App** - Customer admin grants your app permission to access their organization
+3. **Obtain OAuth Tokens** - Get credentials to manage data source registrations
+4. **Register Your Data Source** - Tell WXCC where to send media streams for each customer organization
+5. **Manage JWS Tokens** - Keep authentication credentials fresh (update every 12 hours)
+6. **Create a Flow** - Configure WXCC to fork media for specific calls
+
+Let's walk through each step in detail.
+
+### Step 1: Request a Contact Center Sandbox (Partners/Developers)
+
+**Tool:** [Webex Developer Sandbox Request](https://developer.webex.com/create/docs/sandbox_cc)
+
+Before you can test media forking, you need access to a Webex Contact Center organization. You have two options:
+
+#### Option A: Use a Contact Center Sandbox (Recommended for Development)
+
+1. **Request a sandbox:** Visit https://developer.webex.com/create/docs/sandbox_cc
+2. **Provisioning time:** Sandboxes are typically provisioned within **15 minutes**
+3. **What you get:**
+   - A fully functional Webex Contact Center environment
+   - Two pre-provisioned agent accounts
+   - Access to Control Hub for configuration
+   - Entry points and phone numbers for testing
+
+#### Option B: Use Your Own Organization
+
+You can also develop and test in your own Webex Contact Center organization if you have one.
+
+#### Important: Feature Toggle Enablement Required
+
+⚠️ **Before media forking will work, feature toggles must be enabled for your organization.**
+
+**Action Required:**
+1. **Get your Organization ID:**
+   - Login to Control Hub (https://admin.webex.com)
+   - Your Organization ID is visible in the URL or in Account settings
+   - Format: `05ba0660-6b05-48b0-9185-7343434c0784`
+
+2. **Contact your Product Manager** with:
+   - Your Organization ID (sandbox or development org)
+   - Request to enable media forking feature toggles
+   - Mention you're developing a media forking integration
+
+3. **Wait for confirmation** that toggles are enabled before proceeding
+
+**Why is this needed?** 
+
+During the pre-GA (General Availability) phase, media forking requires manual feature toggle enablement for development and testing purposes. Without these toggles, you won't see the media forking schema option when creating your Service App.
+
+**Note:** Once media forking reaches GA and customers purchase a media forking subscription, feature toggles will be automatically enabled based on the subscription. This manual enablement step is only required during the development/pre-GA phase.
+
+---
+
+### Step 2: Create a Service App
 
 **Tool:** [Webex Developer Portal](https://developer.webex.com)
+
+**Who performs this step:** 
+- **For sandbox testing:** Any of the pre-provisioned accounts in the sandbox (agent accounts or admin)
+- **For production:** The partner creates the Service App in their own partner Webex account
 
 **What is a Service App?**
 
@@ -1515,7 +1424,9 @@ A Service App is a special type of Webex application that operates independently
 
 **Steps:**
 
-1. **Login** to the Webex Developer Portal
+1. **Login** to the Webex Developer Portal:
+   - **Sandbox:** Use any of the pre-provisioned sandbox accounts
+   - **Production:** Use your partner Webex account
 2. Navigate to **My Webex Apps**
 3. Click **Create a New App** → **Create a Service App**
 
@@ -1529,27 +1440,37 @@ A Service App is a special type of Webex application that operates independently
 
 5. **Select Data Source Schema:**
    - ✅ **Media Forking Schema** (this wraps the protobuf protocol)
-   - Specify your **Data Exchange Domain** (your public gRPC endpoint)
-   - Example: `https://media-forking-simulator-abc123.run.app`
-   - **Important:** This is the top-level domain that will be validated. Your actual data source URLs can be subdomains or paths under this domain.
+   - In the Developer Portal, this schema is labeled as `audio_forking_schema`
+   - ❌ **NOT** the "Bring Your Own Virtual Agent" schema
+   - **Important:** If you don't see the "Media Forking Schema" or `audio_forking_schema` option, the feature toggles have not been enabled for your organization. Contact your Product Manager.
+   
+6. **Specify Data Exchange Domain:**
+   - This is the base domain where your gRPC endpoint is hosted
+   - **For Google Cloud Run:** Use the base domain without `https://`
+     - Example: `media-forking-simulator-908846715353.us-central1.run.app`
+     - For URL: `https://media-forking-simulator-908846715353.us-central1.run.app`
+   - **Best Practice:** Use a custom domain (e.g., `media.yourcompany.com`) instead of Cloud Run URLs, as Cloud Run URLs may change
+   - **Important:** This domain is validated. Your actual data source URLs must be this domain or subdomains/paths under it.
 
-6. **Select Required Scopes:**
+7. **Select Required Scopes:**
    - ✅ `spark-admin:dataSource_read` (Required - read data source configurations)
    - ✅ `spark-admin:dataSource_write` (Required - register data sources)
+   - ❌ **No other scopes are needed** for media forking
 
-7. **Save and Copy Credentials:**
+8. **Save and Copy Credentials:**
    - **Client ID:** Copy and save securely
    - **Client Secret:** ⚠️ Shown only once! Copy and save securely
-   - You'll need these to retrieve organization-specific tokens
+   - **Service App ID:** Copy this for reference - the authorized Service App will be selectable by name in the Flow Designer
+   - You'll need the Client ID and Secret to retrieve organization-specific tokens
 
-8. **Submit for Authorization:**
-   - Click **"Request Admin Authorization"** (for testing in your own org)
+9. **Submit for Admin Approval:**
+   - Click **"Request Admin Authorization"** (for testing in your sandbox/own org)
    - Or **"Submit to App Hub"** (for production deployment to customer orgs)
-   - This makes your Service App visible to customer admins for authorization
+   - This makes your Service App visible in Control Hub for authorization
 
 ---
 
-### Step 2: Admin Authorization (Customer Org Admin)
+### Step 3: Admin Authorization (Customer Org Admin)
 
 **Tool:** Webex Control Hub
 
@@ -1576,9 +1497,12 @@ A Service App is a special type of Webex application that operates independently
 - You (the partner) can now retrieve organization-specific access and refresh tokens
 - You can register data sources for this organization
 
+![Authorized Service App in Control Hub](Screenshot%202026-02-11%20at%201.51.53%20PM.png)
+*Service App shown as authorized in Control Hub under Apps → Service Apps*
+
 ---
 
-### Step 3: Retrieve Organization-Specific Tokens
+### Step 4: Retrieve Organization-Specific Tokens
 
 **Tool:** Webex Developer Portal or API
 
@@ -1625,7 +1549,7 @@ Content-Type: application/json
 
 ---
 
-### Step 4: Register Your Data Source
+### Step 5: Register Your Data Source
 
 **Tool:** [Webex Data Sources API](https://developer.webex.com/webex-contact-center/docs/api/v1/data-sources)
 
@@ -1637,49 +1561,74 @@ The API is called "data sources" because it's a generic API used for multiple us
 
 #### Register the Data Source
 
+**API Reference:** [Register a Data Source](https://developer.webex.com/docs/api/v1/data-sources/register-a-data-source)
+
 ```bash
 POST https://webexapis.com/v1/dataSources
 Authorization: Bearer SERVICE_APP_ACCESS_TOKEN_FOR_THIS_ORG
 Content-Type: application/json
 
 {
-  "name": "Acme Media Forking Endpoint - Customer XYZ",
-  "description": "Real-time media streaming for sentiment analysis",
-  "schema": "mediaForking",
-  "endpoint": "https://media-forking-customer-xyz.acme.com:8086",
-  "authentication": {
-    "type": "JWS",
-    "publicKey": "YOUR_PUBLIC_KEY_FOR_JWS_VALIDATION"
-  }
+  "schemaId": "YOUR_MEDIA_FORKING_SCHEMA_ID",
+  "url": "https://media-forking-customer-xyz.acme.com:8086",
+  "audience": "MediaForkingService",
+  "subject": "callAudioData",
+  "nonce": "YOUR_RANDOM_NONCE_STRING",
+  "tokenLifeMinutes": 720
 }
 ```
 
+**Parameter Details:**
+- **schemaId:** The UUID of the media forking schema (obtained from Service App creation or `/v1/dataSources/schemas` API)
+  - Example: `78efc775-dccb-45ca-9acf-989a4a59f788`
+- **url:** Your gRPC endpoint URL - must match or be a subdomain/path of the Data Exchange Domain specified in your Service App
+  - ✅ Service App domain: `acme.com` → Data source: `https://media-forking-customer-xyz.acme.com:8086`
+  - ✅ Service App domain: `acme.com` → Data source: `https://acme.com/customer-xyz:8086`
+  - ❌ Service App domain: `acme.com` → Data source: `https://different.com:8086` (will be rejected)
+- **audience:** Identifier for your service (used in JWS token validation)
+- **subject:** Purpose of the data exchange (e.g., "callAudioData")
+- **nonce:** Random string used to prevent replay attacks - update regularly when refreshing the data source
+- **tokenLifeMinutes:** Token lifetime in minutes (minimum: 60, maximum: 1440 = 24 hours)
+  - Recommended: 720 minutes (12 hours)
+
 **Important Notes:**
-- **Endpoint URL:** Must match or be a subdomain/path of the Data Exchange Domain specified in your Service App
-  - ✅ Service App domain: `acme.com` → Data source: `https://media-forking-customer-xyz.acme.com`
-  - ✅ Service App domain: `acme.com` → Data source: `https://acme.com/customer-xyz`
-  - ❌ Service App domain: `acme.com` → Data source: `https://different.com` (will be rejected)
-- **Authentication:** Provide your public key so WXCC can construct JWS tokens that you can validate
 - **Per-Organization:** Register a separate data source for each customer organization
+- **Token Refresh:** The data source must be updated (PATCH) before the token expires to maintain service
+- **JWS Authentication:** Webex constructs JWS tokens using these parameters to authenticate with your gRPC endpoint
 
 **Response:**
 ```json
 {
-  "id": "dataSource-abc123",
-  "name": "Acme Media Forking Endpoint - Customer XYZ",
-  "schema": "mediaForking",
-  "endpoint": "https://media-forking-customer-xyz.acme.com:8086",
+  "id": "7791dc84-989c-4903-a3b5-8c48c039dfb3",
+  "schemaId": "78efc775-dccb-45ca-9acf-989a4a59f788",
+  "orgId": "ce861fba-6e2f-49f9-9a84-b354008fac9e",
+  "applicationId": "Cc2171594ac633ebec0a22d2af5ff1e44a39539c28838507c3d0de9621d183afe",
   "status": "active",
-  "created": "2026-01-07T16:00:00.000Z",
-  "orgId": "Y2lzY29zcGFyazovL3VzL09SR0FOSVpBVElPTi8..."
+  "jwsToken": "eyJraWQiOiIxOWFmMzYxYS0zYWI0LTU0NzEtYTViMC03MmQxODQyOTRjMmYi...",
+  "tokenExpiryTime": "2024-10-31T02:13:25.776Z",
+  "nonce": "YOUR_RANDOM_NONCE_STRING",
+  "createdBy": "1a034299-8e07-49a9-b147-a4b86999b96c",
+  "createdAt": "2024-10-31T01:13:25.780Z",
+  "url": "https://media-forking-customer-xyz.acme.com:8086"
 }
 ```
 
 **Save the `dataSource-id` for your records.**
 
+⚠️ **CRITICAL: Data Source Must Be Refreshed Regularly**
+
+**Your data source registration must be updated at least every 24 hours** to prevent expiration. Many developers have experienced issues because their data source expired. 
+
+**Best Practice:**
+- Update your data source every **12 hours** (minimum 1 hour, maximum 24 hours)
+- Set up automated refresh to avoid manual errors
+- Monitor expiration times and set alerts
+
+See Step 6 below for detailed token management and refresh procedures.
+
 ---
 
-### Step 5: Token Management Strategy
+### Step 6: Token Management Strategy
 
 **Important:** Understand the different tokens involved and their management requirements.
 
@@ -1823,54 +1772,182 @@ while True:
 
 ---
 
-### Step 6: Create a Flow with Media Forking
+### Step 7: Verify Entry Point and Phone Number
 
-**Tool:** Flow Designer (Control Hub)
+**Tool:** Control Hub
 
-⚠️ **This step is performed by the customer's contact center administrator.**
+**Who performs this step:** Contact Center administrator
 
-1. **Navigate to:** Contact Center → Flows
-2. **Create a new flow** or **edit an existing flow**
+Before configuring the flow, verify that you have an entry point with a phone number that routes to a flow.
 
-3. **Add the Media Forking Activity:**
-   - Drag the **"Media Forking"** activity into your flow
-   - Place it **after** the customer connects to an agent
-   - **Important:** Media forking only works during agent conversations, not during IVR
+1. **Login to Control Hub:** https://admin.webex.com
+2. **Navigate to:** Contact Center → Customer Experience → Channels
+3. **Check for Inbound Telephony Channel:**
+   - You should see an "Inbound Telephony" channel listed
+   - This channel has an entry point associated with it
+   - The entry point should point to a flow (e.g., `BasicQueueFlow`)
 
-4. **Configure the Activity:**
-   - **Service App:** Select your authorized Service App from the dropdown
-     - Only Service Apps that have been authorized will appear here
-     - This is NOT a CCAI Configuration - you're selecting the Service App directly
-   - **Conversation ID:** Use flow variable `{{conversationId}}`
+4. **Note the Phone Number:**
+   - At the bottom of the channel configuration page, you'll see the phone number
+   - **Save this number** - you'll use it to test your media forking integration
+   - Example: `+1-555-123-4567`
 
-5. **Connect the Flow:**
-   ```
-   [Entry Point] → [IVR/Self-Service] → [Queue to Agent] → [Agent Answers] → [Media Forking Activity] → [Continue Flow]
-   ```
-
-6. **Validate and Publish** the flow
-
-**What Happens at Runtime:**
-
-When the media forking activity is triggered:
-1. WXCC Orchestrator receives the media stream from the agent-customer conversation
-2. Orchestrator uses the organization ID to lookup the registered data source URL
-3. Orchestrator retrieves authentication details and constructs a JWS token
-4. Orchestrator establishes a gRPC connection to your endpoint
-5. Orchestrator authenticates with the JWS token
-6. Audio streams (customer and agent channels) are sent to your gRPC server in real-time
+5. **Verify Flow Assignment:**
+   - Confirm the entry point is assigned to `BasicQueueFlow` (or your target flow)
+   - If not assigned, select the flow from the dropdown
 
 ---
 
-### Step 7: Map Entry Point to Flow
+### Step 8: Modify BasicQueueFlow with Media Forking
 
 **Tool:** Flow Designer (Control Hub)
 
-1. **Navigate to:** Contact Center → Channels → Entry Points
-2. **Select your Entry Point** (phone number, chat channel, etc.)
-3. **Routing Strategy:** Select your routing strategy
-4. **Flow:** Select the flow you created in Step 5
-5. **Save the mapping**
+**Who performs this step:** Contact Center administrator
+
+Now configure the flow to trigger media forking when an agent answers a call.
+
+#### Navigate to Flow Designer
+
+1. **Login to Control Hub:** https://admin.webex.com
+2. **Navigate to:** Contact Center → Flows
+3. **Find BasicQueueFlow** in the list
+4. **Click to open** the flow
+
+#### Understand the Flow Structure
+
+When you open BasicQueueFlow, you'll see two tabs:
+- **Main flow:** The primary call flow (IVR, queue, etc.)
+- **Event flows:** Handlers for specific events (agent answered, agent disconnected, etc.)
+
+The Main flow shows:
+- A message is played to the caller
+- The call is placed into a telephony queue
+- The call waits for an agent
+
+**We need to add media forking to the Event flows tab**, specifically after the agent answers.
+
+#### Configure Event Flows
+
+1. **Click the "Event flows" tab** at the top of the Flow Designer
+
+2. **Before configuration**, the Event flows tab shows default event handlers:
+   - `AgentAnswered` - Triggered when agent picks up the call
+   - `PhoneContactEnded` - Triggered when call ends
+   - `AgentDisconnected` - Triggered when agent disconnects
+   - `OnGlobalError` - Error handler
+   - `AgentOffered` - Triggered when call is offered to agent
+   - `PreDial` - Before dialing
+
+3. **Click on the `AgentAnswered` event handler** to expand it
+
+4. **Add the Start Media Stream activity:**
+   - From the left sidebar, find **"Start Media Stream"** activity
+   - Drag it into the `AgentAnswered` event flow
+   - Place it as the first activity after the event trigger
+
+5. **Connect the flow:**
+   - Connect `AgentAnswered` event → `Start Media Stream` activity
+   - Connect `Start Media Stream` → `Disconnect Contact` (on failure path)
+   - The success path continues the call normally
+
+6. **Configure Error Handling (optional):**
+   - Add error handling for the "Failure" output of Start Media Stream
+   - You can choose to disconnect the call or continue without media forking
+
+#### After Configuration
+
+Your Event flows should now look like:
+- `AgentAnswered` → `StartMediaStream` → (success continues call) / (failure → `DisconnectContact`)
+
+![Configured Flow State with Media Forking](Screenshot%202026-02-11%20at%201.52.56%20PM.png)
+*Event flows tab showing Start Media Stream configured in the AgentAnswered event*
+
+#### Configure the Start Media Stream Activity
+
+When you add the **Start Media Stream** activity to the flow, you'll need to configure it:
+
+1. **Select the Service App:**
+   - Click on the Start Media Stream activity to open its configuration
+   - You'll see a dropdown to select a Service App
+   - Choose the Service App you authorized in Step 3
+   - This creates a **reference to your Service App** in the flow state
+
+**How the Flow State Connects to Your Data Source:**
+
+The flow state stores a reference to your Service App. This reference is critical for runtime operation:
+
+- **Flow State** → Contains Service App reference
+- **Service App** → Associated with your organization
+- **Organization** → Has a registered data source (from Step 5)
+- **Data Source** → Contains your gRPC endpoint URL and authentication details
+
+At runtime, the Orchestrator uses this chain of references to:
+1. Look up which data source is registered for this organization
+2. Retrieve your gRPC endpoint URL from the data source
+3. Retrieve your authentication details (public key, nonce, expiration)
+4. Generate a JWS token using those authentication details
+5. Connect to your gRPC server at the specified URL
+6. Authenticate using the generated JWS token
+
+This architecture allows each customer organization to have its own data source configuration while using the same Service App.
+
+#### Validate and Publish
+
+1. **Click "Validate"** to check for errors
+2. **Fix any validation errors**
+3. **Click "Publish"** to make the flow live
+4. **Confirm** the publish action
+
+**What Happens at Runtime:**
+
+When a call comes in and an agent answers:
+1. The `AgentAnswered` event is triggered
+2. The `Start Media Stream` activity executes
+3. WXCC Orchestrator reads the Service App reference from the flow state
+4. Orchestrator looks up the data source URL registered for this organization
+5. Orchestrator retrieves authentication details from the data source registration
+6. Orchestrator constructs a JWS token using your public key, nonce, and expiration
+7. Orchestrator establishes a gRPC connection to your endpoint URL
+8. Orchestrator authenticates with the JWS token
+9. Audio streams (customer and agent channels) are sent to your gRPC server in real-time
+
+---
+
+### Step 9: Agent Login to Agent Desktop
+
+**Tool:** Webex Contact Center Agent Desktop
+
+**Who performs this step:** Contact Center agent
+
+Before testing, an agent must be logged in and available to receive calls.
+
+#### Agent Desktop Login
+
+1. **Navigate to Agent Desktop:**
+   - For US datacenter sandboxes: https://desktop.wxcc-us1.cisco.com/
+   - For other datacenters, use the appropriate regional URL
+
+2. **Login with Agent Credentials:**
+   - Use one of the pre-provisioned agent accounts from your sandbox
+   - Or use your own agent credentials if testing in your organization
+
+3. **Select Team and Dial Number (if required):**
+   - Choose the appropriate team from the dropdown
+   - Enter your dial number if prompted (for outbound calling)
+
+4. **Set Status to Available:**
+   - After logging in, the agent status defaults to "Idle" or "Not Ready"
+   - Click the status dropdown
+   - Select **"Available"** to start receiving calls
+   - The agent is now ready to accept incoming calls
+
+![Agent Desktop - Logged In and Available](Screenshot%202026-02-11%20at%203.30.53%20PM.png)
+*Agent Desktop showing logged-in agent with Available status*
+
+**Important Notes:**
+- The agent must be in **Available** status to receive calls
+- If no agents are available, calls will queue indefinitely
+- Media forking only triggers when an agent **answers** the call
 
 ---
 
@@ -1878,13 +1955,21 @@ When the media forking activity is triggered:
 
 ### Test Checklist
 
+Before making a test call, verify all configuration steps are complete:
+
+- [ ] **Sandbox Provisioned:** Contact Center sandbox is active (or using your own org)
+- [ ] **Feature Toggles Enabled:** Media forking feature toggles enabled by Product Manager
 - [ ] **Simulator Running:** Verify your gRPC server is running and accessible
-- [ ] **Health Check:** Confirm health endpoint responds correctly
-- [ ] **Service App Authorized:** Verify authorization in Control Hub
-- [ ] **Data Source Registered:** Confirm data source is active
-- [ ] **CCAI Configuration Created:** Verify configuration exists
-- [ ] **Flow Published:** Confirm flow is published and active
-- [ ] **Entry Point Mapped:** Verify entry point routes to your flow
+- [ ] **Health Check:** Confirm health endpoint responds correctly (`grpcurl` test passes)
+- [ ] **Service App Created:** Service App created with Media Forking schema and correct scopes
+- [ ] **Service App Authorized:** Admin has authorized the Service App in Control Hub
+- [ ] **OAuth Tokens Retrieved:** Access and refresh tokens obtained for the organization
+- [ ] **Data Source Registered:** Data source registered via API and active
+- [ ] **Data Source Refresh Scheduled:** Automated refresh set up (every 12 hours)
+- [ ] **Entry Point Verified:** Entry point exists with phone number assigned
+- [ ] **Flow Modified:** BasicQueueFlow updated with Start Media Stream in AgentAnswered event
+- [ ] **Flow Published:** Modified flow validated and published
+- [ ] **Agent Logged In:** Agent logged into Agent Desktop and set to Available status
 
 ### Making a Test Call
 
