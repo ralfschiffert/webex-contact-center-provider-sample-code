@@ -233,7 +233,11 @@ Before you begin, ensure you have:
 
 ### 2. Technical Requirements
 - [ ] **gRPC Server:** Ability to host a gRPC server accessible from the internet
-- [ ] **TLS/SSL Certificate:** Valid certificate for secure gRPC connections
+- [ ] **TLS/SSL Certificate (MANDATORY FOR PRODUCTION):** Valid certificate for secure gRPC connections
+  - **Security Requirement:** TLS 1.2 or higher is **required** for production deployments
+  - Without TLS, authentication tokens and audio data are transmitted in plaintext
+  - Self-signed certificates acceptable for development/testing only
+  - Production requires CA-signed certificate from trusted authority
 - [ ] **Public Endpoint:** Your gRPC server must be reachable from WXCC (public IP or domain)
 - [ ] **Firewall Rules:** Appropriate firewall rules to allow incoming gRPC connections
 
@@ -410,6 +414,117 @@ DATASOURCE_URL=https://dialog-connector-simulator.intgus1.ciscoccservice.com:443
   - For Google Cloud Run deployments, set this as an environment variable to match your Cloud Run service URL
   - For local development with ngrok, set this to your ngrok URL
 
+### Step 4a: Configure TLS/SSL Encryption (REQUIRED FOR PRODUCTION)
+
+> **🔒 SECURITY REQUIREMENT:** TLS/SSL encryption is **MANDATORY** for production deployments. Without TLS, all traffic including authentication tokens and audio data is transmitted in plaintext, creating a critical security vulnerability.
+
+The simulator now supports TLS/SSL encryption to protect your gRPC communications. You **MUST** configure TLS before deploying to production.
+
+#### Why TLS is Required
+
+Without TLS encryption:
+- ❌ **Authentication tokens (JWS) are visible in plaintext** - anyone can steal and reuse them
+- ❌ **Customer audio data is unencrypted** - conversations can be intercepted and recorded
+- ❌ **Man-in-the-middle attacks are possible** - attackers can modify or inject data
+- ❌ **Compliance violations** - violates PCI DSS, HIPAA, GDPR, SOC 2 requirements
+- ❌ **Webex security requirements not met** - all external communications must use TLS 1.2+
+
+#### TLS Configuration Options
+
+The simulator supports TLS configuration via environment variables or `config.properties`:
+
+**Option 1: Environment Variables (Recommended for Production)**
+
+```bash
+export TLS_CERT_PATH=/path/to/server.crt
+export TLS_KEY_PATH=/path/to/server.key
+```
+
+**Option 2: config.properties**
+
+Add to `src/main/resources/config.properties`:
+
+```properties
+# TLS/SSL Configuration
+TLS_CERT_PATH=/path/to/server.crt
+TLS_KEY_PATH=/path/to/server.key
+```
+
+**Configuration Priority:** Environment variable > config.properties > not configured
+
+#### Generating TLS Certificates
+
+**For Development/Testing (Self-Signed Certificate):**
+
+```bash
+# Generate private key
+openssl genrsa -out server.key 2048
+
+# Generate certificate signing request
+openssl req -new -key server.key -out server.csr \
+  -subj "/CN=your-domain.com/O=Your Organization/C=US"
+
+# Generate self-signed certificate (valid 365 days)
+openssl x509 -req -days 365 -in server.csr \
+  -signkey server.key -out server.crt
+
+# Verify certificate
+openssl x509 -in server.crt -text -noout
+```
+
+**For Production (CA-Signed Certificate):**
+
+1. Purchase a certificate from a trusted Certificate Authority (Let's Encrypt, DigiCert, etc.)
+2. Generate a Certificate Signing Request (CSR) with your production domain
+3. Submit CSR to CA for signing
+4. Install the signed certificate and intermediate chain
+5. Configure paths in environment variables or config.properties
+
+**For Google Cloud Run:**
+
+Google Cloud Run automatically provides TLS termination, so you don't need to configure certificates manually. However, ensure your data source URL uses `https://`.
+
+#### Server Behavior
+
+**With TLS Configured:**
+```
+✓ Secure gRPC server started at port : 8086 with TLS/SSL encryption
+```
+- All traffic is encrypted with TLS 1.2+
+- Authentication tokens are protected
+- Audio data is encrypted in transit
+- Production-ready security
+
+**Without TLS (Development Only):**
+```
+⚠️  WARNING: TLS is NOT configured! Server will run WITHOUT encryption.
+⚠️  This is a SECURITY RISK and should ONLY be used for local development.
+⚠️  Set TLS_CERT_PATH and TLS_KEY_PATH environment variables or config.properties to enable TLS.
+server started at port : 8086 (UNENCRYPTED)
+```
+
+#### Testing TLS Configuration
+
+After configuring TLS, verify it's working:
+
+```bash
+# Test TLS handshake
+openssl s_client -connect your-domain.com:8086 -showcerts
+
+# Test gRPC health check over TLS
+grpcurl -insecure -d '{}' your-domain.com:8086 com.cisco.wcc.ccai.v1.Health/Check
+```
+
+**Note:** The `-insecure` flag is only for testing with self-signed certificates. Production should use properly signed certificates.
+
+#### Important Security Notes
+
+1. **Never commit certificates or private keys to version control**
+2. **Protect private key file permissions:** `chmod 600 server.key`
+3. **Use strong key sizes:** Minimum 2048-bit RSA keys
+4. **Monitor certificate expiration:** Set up alerts for certificates expiring within 30 days
+5. **Update data source URL to HTTPS:** When registering your data source with Webex, use `https://` instead of `http://`
+
 ### Step 5: Run the Simulator Locally
 
 ```bash
@@ -421,8 +536,20 @@ mvn exec:java -Dexec.mainClass="com.cisco.wccai.grpc.server.GrpcServer"
 ```
 
 **Expected Output:**
+
+**With TLS Configured (Production-Ready):**
 ```
-INFO: server started at port : 8086
+INFO: TLS enabled - Certificate: /path/to/server.crt, Key: /path/to/server.key
+INFO: ✓ Secure gRPC server started at port : 8086 with TLS/SSL encryption
+INFO: Initializing the context
+```
+
+**Without TLS (Development Only):**
+```
+WARN: ⚠️  WARNING: TLS is NOT configured! Server will run WITHOUT encryption.
+WARN: ⚠️  This is a SECURITY RISK and should ONLY be used for local development.
+WARN: ⚠️  Set TLS_CERT_PATH and TLS_KEY_PATH environment variables or config.properties to enable TLS.
+INFO: server started at port : 8086 (UNENCRYPTED)
 INFO: Initializing the context
 ```
 
@@ -439,6 +566,16 @@ brew install grpcurl
 apt-get install grpcurl  # or yum install grpcurl
 ```
 
+**Testing with TLS Enabled:**
+```bash
+# List available services (use -insecure for self-signed certificates)
+grpcurl -insecure :8086 list
+
+# Test the health endpoint
+grpcurl -insecure -d '{}' :8086 com.cisco.wcc.ccai.v1.Health/Check
+```
+
+**Testing without TLS (Development Only):**
 ```bash
 # List available services
 grpcurl -plaintext :8086 list
@@ -454,7 +591,7 @@ grpcurl -plaintext -d '{}' :8086 com.cisco.wcc.ccai.v1.Health/Check
 }
 ```
 
-**Note:** The health check endpoint does not require authentication for local testing. It's designed to be accessible for monitoring and verification purposes.
+**Note:** The health check endpoint does not require authentication for local testing. It's designed to be accessible for monitoring and verification purposes. The `-insecure` flag is only needed when using self-signed certificates for development/testing.
 
 **Stopping the Server:**
 
