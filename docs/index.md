@@ -109,36 +109,13 @@ Analyze customer emotions and sentiment during the call to help agents adjust th
 
 ### High-Level Architecture
 
-```mermaid
-flowchart TB
-    subgraph Customer["Customer Journey"]
-        A[Customer Calls In] --> B[IVR / Self-Service]
-        B --> C[Customer Requests Agent]
-    end
-    
-    subgraph WXCC["Webex Contact Center (WXCC)"]
-        D[Flow Designer:<br/>Media Forking Activity Triggered]
-        E[CCAI Orchestrator:<br/>Fetches Configuration<br/>- Media Sink Endpoint<br/>- Authentication Credentials<br/>- Feature Flags]
-        F[Establishes gRPC Connection<br/>to Partner Endpoint]
-        
-        D --> E
-        E --> F
-    end
-    
-    subgraph Partner["Your Media Sink (gRPC Server)"]
-        G[Receives Real-Time Audio Streams<br/>- Channel 1: Customer Audio<br/>- Channel 2: Agent Audio]
-        H[Your AI/Processing Pipeline<br/>- Speech-to-Text<br/>- Sentiment Analysis<br/>- Real-Time Insights<br/>- Recording/Storage]
-        
-        G --> H
-    end
-    
-    C --> D
-    F -->|gRPC Bidirectional Stream| G
-    
-    style Customer fill:#e1f5ff
-    style WXCC fill:#fff4e1
-    style Partner fill:#e8f5e9
-```
+![Media Forking Architecture Diagram](images/architecture-diagram.png)
+
+The architecture consists of three main components:
+
+1. **Customer Journey (Blue):** Customer calls in, interacts with IVR, and requests to speak with an agent
+2. **Webex Contact Center (Yellow):** Flow Designer triggers media forking, CCAI Orchestrator fetches configuration and establishes gRPC connection
+3. **Your Media Sink (Green):** Your gRPC server receives real-time audio streams and processes them through your AI pipeline
 
 ### Component Breakdown
 
