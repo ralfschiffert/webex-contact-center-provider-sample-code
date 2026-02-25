@@ -109,54 +109,35 @@ Analyze customer emotions and sentiment during the call to help agents adjust th
 
 ### High-Level Architecture
 
-```
-┌───────────────────────────────────────────────────────────────┐
-│                     CUSTOMER CALLS IN                         │
-│                            ↓                                  │
-│                     IVR / Self-Service                        │
-│                            ↓                                  │
-│               Customer Requests Agent                         │
-│                            ↓                                  │
-└───────────────────────────────────────────────────────────────┘
-                             ↓
-┌───────────────────────────────────────────────────────────────┐
-│               WEBEX CONTACT CENTER (WXCC)                     │
-│                                                               │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │  Flow Designer: Media Forking Activity Triggered    │    │
-│  └─────────────────────────────────────────────────────┘    │
-│                            ↓                                  │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │  CCAI Orchestrator: Fetches Configuration          │    │
-│  │  - Media Sink Endpoint                              │    │
-│  │  - Authentication Credentials                       │    │
-│  │  - Feature Flags                                    │    │
-│  └─────────────────────────────────────────────────────┘    │
-│                            ↓                                  │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │  Establishes gRPC Connection to Partner Endpoint   │    │
-│  └─────────────────────────────────────────────────────┘    │
-└───────────────────────────────────────────────────────────────┘
-                             ↓
-                   gRPC Bidirectional Stream
-                             ↓
-┌───────────────────────────────────────────────────────────────┐
-│               YOUR MEDIA SINK (gRPC Server)                   │
-│                                                               │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │  Receives Real-Time Audio Streams                   │    │
-│  │  - Channel 1: Customer Audio                        │    │
-│  │  - Channel 2: Agent Audio                           │    │
-│  └─────────────────────────────────────────────────────┘    │
-│                            ↓                                  │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │  Your AI/Processing Pipeline                        │    │
-│  │  - Speech-to-Text                                   │    │
-│  │  - Sentiment Analysis                               │    │
-│  │  - Real-Time Insights                               │    │
-│  │  - Recording/Storage                                │    │
-│  └─────────────────────────────────────────────────────┘    │
-└───────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph Customer["Customer Journey"]
+        A[Customer Calls In] --> B[IVR / Self-Service]
+        B --> C[Customer Requests Agent]
+    end
+    
+    subgraph WXCC["Webex Contact Center (WXCC)"]
+        D[Flow Designer:<br/>Media Forking Activity Triggered]
+        E[CCAI Orchestrator:<br/>Fetches Configuration<br/>- Media Sink Endpoint<br/>- Authentication Credentials<br/>- Feature Flags]
+        F[Establishes gRPC Connection<br/>to Partner Endpoint]
+        
+        D --> E
+        E --> F
+    end
+    
+    subgraph Partner["Your Media Sink (gRPC Server)"]
+        G[Receives Real-Time Audio Streams<br/>- Channel 1: Customer Audio<br/>- Channel 2: Agent Audio]
+        H[Your AI/Processing Pipeline<br/>- Speech-to-Text<br/>- Sentiment Analysis<br/>- Real-Time Insights<br/>- Recording/Storage]
+        
+        G --> H
+    end
+    
+    C --> D
+    F -->|gRPC Bidirectional Stream| G
+    
+    style Customer fill:#e1f5ff
+    style WXCC fill:#fff4e1
+    style Partner fill:#e8f5e9
 ```
 
 ### Component Breakdown
