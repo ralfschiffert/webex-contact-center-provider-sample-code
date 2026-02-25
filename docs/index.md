@@ -3,7 +3,7 @@
 > **Note:** This guide uses `<REPO_ROOT>` to represent the directory where you cloned the repository. Replace this with your actual path (e.g., `/home/user/projects` or `C:\Users\username\projects`).
 
 **Feature:** Real-Time Media Streaming for Customer-Agent Conversations  
-**Last Updated:** January 7, 2026  
+**Last Updated:** February 24, 2026  
 **Audience:** Developers and Partners
 
 ---
