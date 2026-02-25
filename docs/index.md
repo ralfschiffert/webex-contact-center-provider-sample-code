@@ -110,53 +110,53 @@ Analyze customer emotions and sentiment during the call to help agents adjust th
 ### High-Level Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                    CUSTOMER CALLS IN                             │
-│                           ↓                                      │
-│                    IVR / Self-Service                            │
-│                           ↓                                      │
-│              Customer Requests Agent                             │
-│                           ↓                                      │
-└─────────────────────────────────────────────────────────────────┘
-                              ↓
-┌─────────────────────────────────────────────────────────────────┐
-│              WEBEX CONTACT CENTER (WXCC)                         │
-│                                                                  │
-│  ┌────────────────────────────────────────────────────────┐    │
-│  │  Flow Designer: Media Forking Activity Triggered       │    │
-│  └────────────────────────────────────────────────────────┘    │
-│                           ↓                                      │
-│  ┌────────────────────────────────────────────────────────┐    │
-│  │  CCAI Orchestrator: Fetches Configuration             │    │
-│  │  - Media Sink Endpoint                                 │    │
-│  │  - Authentication Credentials                          │    │
-│  │  - Feature Flags                                       │    │
-│  └────────────────────────────────────────────────────────┘    │
-│                           ↓                                      │
-│  ┌────────────────────────────────────────────────────────┐    │
-│  │  Establishes gRPC Connection to Partner Endpoint      │    │
-│  └────────────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────────┘
-                              ↓
-                    gRPC Bidirectional Stream
-                              ↓
-┌─────────────────────────────────────────────────────────────────┐
-│              YOUR MEDIA SINK (gRPC Server)                       │
-│                                                                  │
-│  ┌────────────────────────────────────────────────────────┐    │
-│  │  Receives Real-Time Audio Streams                      │    │
-│  │  - Channel 1: Customer Audio                           │    │
-│  │  - Channel 2: Agent Audio                              │    │
-│  └────────────────────────────────────────────────────────┘    │
-│                           ↓                                      │
-│  ┌────────────────────────────────────────────────────────┐    │
-│  │  Your AI/Processing Pipeline                           │    │
-│  │  - Speech-to-Text                                      │    │
-│  │  - Sentiment Analysis                                  │    │
-│  │  - Real-Time Insights                                  │    │
-│  │  - Recording/Storage                                   │    │
-│  └────────────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────┐
+│                     CUSTOMER CALLS IN                         │
+│                            ↓                                  │
+│                     IVR / Self-Service                        │
+│                            ↓                                  │
+│               Customer Requests Agent                         │
+│                            ↓                                  │
+└───────────────────────────────────────────────────────────────┘
+                             ↓
+┌───────────────────────────────────────────────────────────────┐
+│               WEBEX CONTACT CENTER (WXCC)                     │
+│                                                               │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │  Flow Designer: Media Forking Activity Triggered    │    │
+│  └─────────────────────────────────────────────────────┘    │
+│                            ↓                                  │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │  CCAI Orchestrator: Fetches Configuration          │    │
+│  │  - Media Sink Endpoint                              │    │
+│  │  - Authentication Credentials                       │    │
+│  │  - Feature Flags                                    │    │
+│  └─────────────────────────────────────────────────────┘    │
+│                            ↓                                  │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │  Establishes gRPC Connection to Partner Endpoint   │    │
+│  └─────────────────────────────────────────────────────┘    │
+└───────────────────────────────────────────────────────────────┘
+                             ↓
+                   gRPC Bidirectional Stream
+                             ↓
+┌───────────────────────────────────────────────────────────────┐
+│               YOUR MEDIA SINK (gRPC Server)                   │
+│                                                               │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │  Receives Real-Time Audio Streams                   │    │
+│  │  - Channel 1: Customer Audio                        │    │
+│  │  - Channel 2: Agent Audio                           │    │
+│  └─────────────────────────────────────────────────────┘    │
+│                            ↓                                  │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │  Your AI/Processing Pipeline                        │    │
+│  │  - Speech-to-Text                                   │    │
+│  │  - Sentiment Analysis                               │    │
+│  │  - Real-Time Insights                               │    │
+│  │  - Recording/Storage                                │    │
+│  └─────────────────────────────────────────────────────┘    │
+└───────────────────────────────────────────────────────────────┘
 ```
 
 ### Component Breakdown
@@ -1646,7 +1646,7 @@ A Service App is a special type of Webex application that operates independently
 - You (the partner) can now retrieve organization-specific access and refresh tokens
 - You can register data sources for this organization
 
-![Authorized Service App in Control Hub](Screenshot%202026-02-11%20at%201.51.53%20PM.png)
+![Authorized Service App in Control Hub](images/control-hub-authorized-service-app.png)
 *Service App shown as authorized in Control Hub under Apps → Service Apps*
 
 ---
@@ -2008,7 +2008,7 @@ The Main flow shows:
 Your Event flows should now look like:
 - `AgentAnswered` → `StartMediaStream` → (success continues call) / (failure → `DisconnectContact`)
 
-![Configured Flow State with Media Forking](Screenshot%202026-02-11%20at%201.52.56%20PM.png)
+![Configured Flow State with Media Forking](images/flow-designer-media-forking.png)
 *Event flows tab showing Start Media Stream configured in the AgentAnswered event*
 
 #### Configure the Start Media Stream Activity
@@ -2090,7 +2090,7 @@ Before testing, an agent must be logged in and available to receive calls.
    - Select **"Available"** to start receiving calls
    - The agent is now ready to accept incoming calls
 
-![Agent Desktop - Logged In and Available](Screenshot%202026-02-11%20at%203.30.53%20PM.png)
+![Agent Desktop - Logged In and Available](images/agent-desktop-logged-in.png)
 *Agent Desktop showing logged-in agent with Available status*
 
 **Important Notes:**
