@@ -21,11 +21,16 @@ import java.util.Properties;
 
 /**
  * The type Grpc server.
+ * 
+ * This server runs two separate gRPC server instances:
+ * 1. Main server (TLS-protected) for audio services on port 8086 (configurable)
+ * 2. Health check server (plaintext) on port 8080 (configurable)
  */
 public class GrpcServer {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(GrpcServer.class);
     private static final int PORT = 8086;
+    private static final int HEALTH_PORT = 8080;
     private static final Properties properties = LoadProperties.loadProperties();
     @Getter @Setter
     private static boolean serverIsRunning;
@@ -39,11 +44,11 @@ public class GrpcServer {
      */
     public static void main(String [] args) throws IOException, InterruptedException {
 
+        // Configure main server port
         String port = System.getenv("PORT");
         int listeningPort;
 
         if (port == null || port.isEmpty()) {
-            // Try to read from config.properties if environment variable not set
             String configPort = properties.getProperty("PORT");
             if (configPort != null && !configPort.trim().isEmpty()) {
                 listeningPort = Integer.parseInt(configPort.trim());
@@ -54,13 +59,27 @@ public class GrpcServer {
             listeningPort = Integer.parseInt(port);
         }
 
-        LOGGER.info("the environment variable port is : {}", port);
+        // Configure health check port
+        String healthPortEnv = System.getenv("HEALTH_PORT");
+        int healthCheckPort;
+
+        if (healthPortEnv == null || healthPortEnv.isEmpty()) {
+            String configHealthPort = properties.getProperty("HEALTH_PORT");
+            if (configHealthPort != null && !configHealthPort.trim().isEmpty()) {
+                healthCheckPort = Integer.parseInt(configHealthPort.trim());
+            } else {
+                healthCheckPort = HEALTH_PORT;
+            }
+        } else {
+            healthCheckPort = Integer.parseInt(healthPortEnv);
+        }
+
+        LOGGER.info("Main server port: {}, Health check port: {}", listeningPort, healthCheckPort);
 
         // TLS Configuration
         String tlsCertPath = System.getenv("TLS_CERT_PATH");
         String tlsKeyPath = System.getenv("TLS_KEY_PATH");
         
-        // Fallback to config.properties if environment variables not set
         if (tlsCertPath == null || tlsCertPath.isEmpty()) {
             tlsCertPath = properties.getProperty("TLS_CERT_PATH");
         }
@@ -68,9 +87,17 @@ public class GrpcServer {
             tlsKeyPath = properties.getProperty("TLS_KEY_PATH");
         }
 
-        Server server;
+        // Start health check server (always plaintext, no authentication)
+        Server healthServer = ServerBuilder.forPort(healthCheckPort)
+                .addService(new com.cisco.wccai.grpc.server.HealthCheckImpl())
+                .build()
+                .start();
         
-        // Check if TLS is configured
+        LOGGER.info("✓ Health check server started at port : {} (plaintext, no authentication required)", healthCheckPort);
+
+        Server mainServer;
+        
+        // Check if TLS is configured for main server
         if (tlsCertPath != null && !tlsCertPath.isEmpty() && 
             tlsKeyPath != null && !tlsKeyPath.isEmpty()) {
             
@@ -91,14 +118,13 @@ public class GrpcServer {
             SslContext sslContext = GrpcSslContexts.forServer(certChainFile, privateKeyFile)
                     .build();
             
-            // Create secure server with TLS
-            server = NettyServerBuilder.forPort(listeningPort)
+            // Create secure main server with TLS (audio services only, no health check)
+            mainServer = NettyServerBuilder.forPort(listeningPort)
                     .sslContext(sslContext)
                     .intercept(new ServiceExceptionHandler())
                     .addService(new VoiceVAImpl())
                     .addService(new ConversationAudioForkServiceImpl())
                     .addService(ProtoReflectionService.newInstance())
-                    .addService(new com.cisco.wccai.grpc.server.HealthCheckImpl())
                     .intercept(new AuthorizationServerInterceptor())
                     .build()
                     .start();
@@ -107,16 +133,15 @@ public class GrpcServer {
             
         } else {
             // TLS not configured - start without encryption (NOT RECOMMENDED FOR PRODUCTION)
-            LOGGER.warn("⚠️  WARNING: TLS is NOT configured! Server will run WITHOUT encryption.");
+            LOGGER.warn("⚠️  WARNING: TLS is NOT configured! Main server will run WITHOUT encryption.");
             LOGGER.warn("⚠️  This is a SECURITY RISK and should ONLY be used for local development.");
             LOGGER.warn("⚠️  Set TLS_CERT_PATH and TLS_KEY_PATH environment variables or config.properties to enable TLS.");
             
-            server = ServerBuilder.forPort(listeningPort)
+            mainServer = ServerBuilder.forPort(listeningPort)
                     .intercept(new ServiceExceptionHandler())
                     .addService(new VoiceVAImpl())
                     .addService(new ConversationAudioForkServiceImpl())
                     .addService(ProtoReflectionService.newInstance())
-                    .addService(new com.cisco.wccai.grpc.server.HealthCheckImpl())
                     .intercept(new AuthorizationServerInterceptor())
                     .build()
                     .start();
@@ -128,13 +153,13 @@ public class GrpcServer {
 
         Runtime.getRuntime().addShutdownHook(new Thread( () -> {
             LOGGER.info("Received Shutdown Request");
-            server.shutdown();
-            LOGGER.info("Successfully Stopped, Shutting down the server");
+            mainServer.shutdown();
+            healthServer.shutdown();
+            LOGGER.info("Successfully stopped both servers");
             serverIsRunning = false;
         }));
 
-
         // await for Termination of Program
-        server.awaitTermination();
+        mainServer.awaitTermination();
     }
 }
