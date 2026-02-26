@@ -3,7 +3,7 @@
 > **Note:** This guide uses `<REPO_ROOT>` to represent the directory where you cloned the repository. Replace this with your actual path (e.g., `/home/user/projects` or `C:\Users\username\projects`).
 
 **Feature:** Real-Time Media Streaming for Customer-Agent Conversations  
-**Last Updated:** February 24, 2026  
+**Last Updated:** February 26, 2026  
 **Audience:** Developers and Partners
 
 ---
@@ -14,13 +14,14 @@
 2. [What is Media Forking?](#what-is-media-forking)
 3. [Use Cases](#use-cases)
 4. [Architecture](#architecture)
-5. [Prerequisites](#prerequisites)
-6. [Quick Start: Running the Simulator](#quick-start-running-the-simulator)
-7. [Step-by-Step Setup Guide](#step-by-step-setup-guide)
-8. [Testing Your Integration](#testing-your-integration)
-9. [Troubleshooting](#troubleshooting)
-10. [Next Steps](#next-steps)
-11. [Support & Resources](#support--resources)
+5. [Load Balancer Support](#load-balancer-support)
+6. [Prerequisites](#prerequisites)
+7. [Quick Start: Running the Simulator](#quick-start-running-the-simulator)
+8. [Step-by-Step Setup Guide](#step-by-step-setup-guide)
+9. [Testing Your Integration](#testing-your-integration)
+10. [Troubleshooting](#troubleshooting)
+11. [Next Steps](#next-steps)
+12. [Support & Resources](#support--resources)
 
 ---
 
@@ -169,6 +170,404 @@ The architecture consists of three main components:
 
 ---
 
+## Load Balancer Support
+
+### Overview
+
+When deploying Media Forking in production, you'll likely need to use a load balancer for high availability and scalability. This section explains how Webex Orchestrator supports load balancer routing through HTTP/2 headers.
+
+### Understanding the Stream Architecture
+
+For each call, Webex Orchestrator establishes **two separate gRPC connections** to your endpoint:
+
+1. **Connection 1:** Agent audio stream (`role=AGENT`)
+2. **Connection 2:** Customer audio stream (`role=CALLER`)
+
+These are separate HTTP/2 streams at the network level. While both connections include the `conversation_id` in the protobuf message body, load balancers cannot inspect protobuf data (it's binary and opaque).
+
+### The x-conversation-id HTTP/2 Header
+
+To enable load balancer routing, Webex Orchestrator includes the `conversation_id` as an **HTTP/2 header** on all Media Forking connections:
+
+**Header Name:** `x-conversation-id`  
+**Header Value:** The conversation ID (UUID format)  
+**Present On:** Both agent and customer gRPC streams for the same call
+
+#### Important: gRPC Metadata = HTTP/2 Headers
+
+**gRPC metadata headers ARE HTTP/2 headers.** gRPC is built on top of HTTP/2, so when Orchestrator adds gRPC metadata, it appears as a standard HTTP/2 header that load balancers can see and route on.
+
+**What your load balancer sees:**
+```
+HEADERS frame:
+  :method: POST
+  :scheme: https
+  :path: /com.cisco.wcc.ccai.media.v1.ConversationAudio/StreamConversationAudio
+  :authority: your-endpoint.com:50051
+  content-type: application/grpc
+  x-conversation-id: 550e8400-e29b-41d4-a716-446655440000  ← Standard HTTP/2 header
+  authorization: Bearer <JWS_TOKEN>
+```
+
+### How This Enables Load Balancing
+
+With the `x-conversation-id` header, you can configure your load balancer to use **consistent hashing** to ensure both agent and customer streams for the same call route to the same backend server:
+
+1. **Load balancer receives connection** from Orchestrator
+2. **Reads `x-conversation-id` header** (standard HTTP/2 header)
+3. **Hashes the conversation ID** to select a backend server
+4. **Routes the connection** to that server
+5. **Both streams with same conversation ID** → same backend server
+
+### Load Balancer Configuration Examples
+
+**Important:** The simulator now runs two separate servers:
+- **Main Server (Port 8086):** TLS-protected, for audio services
+- **Health Check Server (Port 8080):** Plaintext, no certificate required
+
+Configure your load balancer to:
+- Route audio traffic to port 8086 (TLS)
+- Perform health checks on port 8080 (plaintext, no certificate hassle)
+
+#### NGINX
+
+```nginx
+upstream media_forking_backends {
+    # Use consistent hashing on x-conversation-id header
+    hash $http_x_conversation_id consistent;
+    
+    server backend1.example.com:8086 max_fails=3 fail_timeout=30s;
+    server backend2.example.com:8086 max_fails=3 fail_timeout=30s;
+    server backend3.example.com:8086 max_fails=3 fail_timeout=30s;
+}
+
+upstream media_forking_health {
+    # Health check backends (plaintext, port 8080)
+    server backend1.example.com:8080;
+    server backend2.example.com:8080;
+    server backend3.example.com:8080;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name media-forking.example.com;
+    
+    ssl_certificate /path/to/cert.pem;
+    ssl_certificate_key /path/to/key.pem;
+    
+    # Main audio services (port 8086, TLS)
+    location / {
+        grpc_pass grpcs://media_forking_backends;
+        grpc_read_timeout 3600s;
+        grpc_send_timeout 3600s;
+    }
+}
+
+# Separate health check endpoint (plaintext, port 8080)
+server {
+    listen 8080;
+    server_name media-forking.example.com;
+    
+    location / {
+        grpc_pass grpc://media_forking_health;
+    }
+}
+```
+
+#### HAProxy
+
+```haproxy
+# Main audio service frontend (TLS, port 443)
+frontend grpc_frontend
+    bind *:443 ssl crt /path/to/cert.pem alpn h2
+    mode http
+    default_backend grpc_backend
+
+# Health check frontend (plaintext, port 8080)
+frontend health_frontend
+    bind *:8080
+    mode http
+    default_backend health_backend
+
+# Main backend (port 8086, TLS)
+backend grpc_backend
+    mode http
+    
+    # Balance based on x-conversation-id header with consistent hashing
+    balance hdr(x-conversation-id)
+    hash-type consistent
+    
+    # Backend servers - health checks on port 8080 (plaintext)
+    server backend1 backend1.example.com:8086 check port 8080
+    server backend2 backend2.example.com:8086 check port 8080
+    server backend3 backend3.example.com:8086 check port 8080
+    
+    # Timeouts for long-lived connections
+    timeout connect 5s
+    timeout client 3600s
+    timeout server 3600s
+
+# Health check backend (port 8080, plaintext)
+backend health_backend
+    mode http
+    server backend1 backend1.example.com:8080 check
+    server backend2 backend2.example.com:8080 check
+    server backend3 backend3.example.com:8080 check
+```
+
+#### Envoy Proxy
+
+```yaml
+static_resources:
+  listeners:
+  - name: listener_0
+    address:
+      socket_address:
+        address: 0.0.0.0
+        port_value: 443
+    filter_chains:
+    - filters:
+      - name: envoy.filters.network.http_connection_manager
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          stat_prefix: ingress_http
+          codec_type: AUTO
+          route_config:
+            name: local_route
+            virtual_hosts:
+            - name: backend
+              domains: ["*"]
+              routes:
+              - match:
+                  prefix: "/"
+                  grpc: {}
+                route:
+                  cluster: media_forking_cluster
+                  # Hash on x-conversation-id header
+                  hash_policy:
+                  - header:
+                      header_name: x-conversation-id
+          http_filters:
+          - name: envoy.filters.http.router
+      transport_socket:
+        name: envoy.transport_sockets.tls
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+          common_tls_context:
+            tls_certificates:
+            - certificate_chain:
+                filename: /path/to/cert.pem
+              private_key:
+                filename: /path/to/key.pem
+
+  clusters:
+  # Main audio service cluster (port 8086, TLS)
+  - name: media_forking_cluster
+    connect_timeout: 5s
+    type: STRICT_DNS
+    
+    # Ring hash for consistent routing
+    lb_policy: RING_HASH
+    ring_hash_lb_config:
+      hash_function: XX_HASH
+      minimum_ring_size: 1024
+    
+    # Enable HTTP/2 for gRPC
+    http2_protocol_options: {}
+    
+    # Health checks on port 8080 (plaintext)
+    health_checks:
+    - timeout: 5s
+      interval: 10s
+      unhealthy_threshold: 3
+      healthy_threshold: 2
+      grpc_health_check:
+        service_name: ""
+      custom_health_check:
+        name: envoy.health_checkers.http
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.health_checkers.grpc.v3.HealthChecker
+          transport_socket_match_criteria:
+            plaintext: {}
+    
+    load_assignment:
+      cluster_name: media_forking_cluster
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address:
+                address: backend1.example.com
+                port_value: 8086
+            health_check_config:
+              port_value: 8080
+        - endpoint:
+            address:
+              socket_address:
+                address: backend2.example.com
+                port_value: 8086
+            health_check_config:
+              port_value: 8080
+        - endpoint:
+            address:
+              socket_address:
+                address: backend3.example.com
+                port_value: 8086
+            health_check_config:
+              port_value: 8080
+```
+
+#### AWS Application Load Balancer (ALB)
+
+AWS ALB supports gRPC and can route based on HTTP headers:
+
+```bash
+# Create target group for main audio service (port 8086)
+aws elbv2 create-target-group \
+  --name media-forking-targets \
+  --protocol HTTPS \
+  --port 8086 \
+  --vpc-id vpc-xxxxx \
+  --target-type ip \
+  --health-check-enabled \
+  --health-check-protocol HTTP \
+  --health-check-port 8080 \
+  --health-check-path /grpc.health.v1.Health/Check
+
+# Create load balancer
+aws elbv2 create-load-balancer \
+  --name media-forking-lb \
+  --subnets subnet-xxxxx subnet-yyyyy \
+  --security-groups sg-xxxxx \
+  --scheme internet-facing \
+  --type application
+
+# Create listener with gRPC support
+aws elbv2 create-listener \
+  --load-balancer-arn arn:aws:elasticloadbalancing:... \
+  --protocol HTTPS \
+  --port 443 \
+  --certificates CertificateArn=arn:aws:acm:... \
+  --default-actions Type=forward,TargetGroupArn=arn:aws:elasticloadbalancing:...
+
+# Enable stickiness based on header
+aws elbv2 modify-target-group-attributes \
+  --target-group-arn arn:aws:elasticloadbalancing:... \
+  --attributes Key=stickiness.enabled,Value=true \
+                Key=stickiness.type,Value=app_cookie \
+                Key=stickiness.app_cookie.cookie_name,Value=x-conversation-id
+```
+
+**Note:** AWS ALB uses application-based stickiness. For true consistent hashing, consider using AWS Global Accelerator with custom routing or Envoy on EC2/ECS.
+
+#### Google Cloud Load Balancer
+
+For GCP, use Cloud Load Balancing with session affinity:
+
+```bash
+# Create health check on port 8080 (plaintext)
+gcloud compute health-checks create http grpc-health-check \
+  --port=8080 \
+  --request-path=/grpc.health.v1.Health/Check
+
+# Create backend service with session affinity (port 8086)
+gcloud compute backend-services create media-forking-backend \
+  --global \
+  --protocol=HTTP2 \
+  --port-name=grpc \
+  --health-checks=grpc-health-check \
+  --session-affinity=HEADER_FIELD \
+  --custom-request-header="x-conversation-id"
+
+# Add backend instances
+gcloud compute backend-services add-backend media-forking-backend \
+  --global \
+  --instance-group=media-forking-ig \
+  --instance-group-zone=us-central1-a \
+  --balancing-mode=UTILIZATION \
+  --max-utilization=0.8
+```
+
+**Note:** Configure your instance group to expose port 8086 for audio traffic and port 8080 for health checks.
+
+### Verification
+
+After configuring your load balancer, verify that both streams route to the same backend:
+
+#### Test with Multiple Backends
+
+1. **Deploy 3 backend servers** with unique identifiers
+2. **Make a test call** through your Media Forking setup
+3. **Check logs on all backends** to see which received the streams
+4. **Verify:** Both agent and customer streams should appear on the **same backend**
+
+#### Log Example
+
+**Backend 1 logs:**
+```
+INFO: Connection received - conversation_id: 550e8400-e29b-41d4-a716-446655440000, role: AGENT
+INFO: Connection received - conversation_id: 550e8400-e29b-41d4-a716-446655440000, role: CALLER
+```
+
+**Backend 2 logs:**
+```
+(no connections for this conversation_id)
+```
+
+**Backend 3 logs:**
+```
+(no connections for this conversation_id)
+```
+
+#### Monitor Header Presence
+
+Use packet capture to verify the header is present:
+
+```bash
+# Capture traffic on load balancer
+sudo tcpdump -i any -s 0 -w capture.pcap 'port 443'
+
+# Analyze with tshark
+tshark -r capture.pcap -Y "http2.header.name == \"x-conversation-id\"" -T fields -e http2.header.value
+```
+
+### Best Practices
+
+1. **Use Consistent Hashing:** Ensures same conversation always routes to same backend
+2. **Configure Health Checks:** Use the gRPC health check endpoint
+3. **Set Appropriate Timeouts:** Calls can last 30+ minutes, set timeouts accordingly
+4. **Monitor Distribution:** Ensure conversations are evenly distributed across backends
+5. **Plan for Failover:** Configure backup backends and graceful degradation
+6. **Test Thoroughly:** Verify routing with multiple concurrent calls
+
+### Troubleshooting Load Balancer Issues
+
+#### Both Streams Not Reaching Same Backend
+
+**Symptoms:**
+- Agent audio on Backend 1, customer audio on Backend 2
+- Cannot correlate streams for the same call
+
+**Solutions:**
+1. Verify load balancer is configured for consistent hashing on `x-conversation-id`
+2. Check that header name matches exactly (case-sensitive)
+3. Ensure hash algorithm is consistent (not random or round-robin)
+4. Test with packet capture to confirm header is present
+
+#### Uneven Load Distribution
+
+**Symptoms:**
+- One backend receives most calls
+- Other backends idle
+
+**Solutions:**
+1. Increase ring size for better distribution (Envoy: `minimum_ring_size`)
+2. Verify hash function is distributing evenly
+3. Check backend health - unhealthy backends won't receive traffic
+4. Monitor conversation ID distribution (should be random UUIDs)
+
+---
+
 ## Prerequisites
 
 Before you begin, ensure you have:
@@ -191,11 +590,12 @@ Before you begin, ensure you have:
 
 ### 2. Technical Requirements
 - [ ] **gRPC Server:** Ability to host a gRPC server accessible from the internet
-- [ ] **TLS/SSL Certificate (MANDATORY FOR PRODUCTION):** Valid certificate for secure gRPC connections
-  - **Security Requirement:** TLS 1.2 or higher is **required** for production deployments
+- [ ] **TLS/SSL Certificate (MANDATORY):** Valid CA-signed certificate for secure gRPC connections
+  - **Security Requirement:** TLS 1.2 or higher is **required** for all deployments
+  - **Certificate Requirement:** Must be signed by a trusted Certificate Authority (CA)
+  - **Self-signed certificates are NOT supported** - Webex Orchestrator will reject connections with self-signed certificates
   - Without TLS, authentication tokens and audio data are transmitted in plaintext
-  - Self-signed certificates acceptable for development/testing only
-  - Production requires CA-signed certificate from trusted authority
+  - Recommended CAs: Let's Encrypt (free), DigiCert, Sectigo, GlobalSign
 - [ ] **Public Endpoint:** Your gRPC server must be reachable from WXCC (public IP or domain)
 - [ ] **Firewall Rules:** Appropriate firewall rules to allow incoming gRPC connections
 
@@ -376,7 +776,11 @@ DATASOURCE_URL=https://dialog-connector-simulator.intgus1.ciscoccservice.com:443
 
 > **🔒 SECURITY REQUIREMENT:** TLS/SSL encryption is **MANDATORY** for production deployments. Without TLS, all traffic including authentication tokens and audio data is transmitted in plaintext, creating a critical security vulnerability.
 
-The simulator now supports TLS/SSL encryption to protect your gRPC communications. You **MUST** configure TLS before deploying to production.
+The simulator runs **two separate gRPC servers**:
+1. **Main Server (Port 8086):** TLS-protected for audio services - **REQUIRES CA-signed certificate**
+2. **Health Check Server (Port 8080):** Plaintext, no certificate required - for monitoring and load balancers
+
+You **MUST** configure TLS for the main server before deploying to production.
 
 #### Why TLS is Required
 
@@ -410,33 +814,68 @@ TLS_KEY_PATH=/path/to/server.key
 
 **Configuration Priority:** Environment variable > config.properties > not configured
 
-#### Generating TLS Certificates
+#### Health Check Port Configuration
 
-**For Development/Testing (Self-Signed Certificate):**
+The health check server runs on a separate port (default 8080) without TLS:
 
+**Option 1: Environment Variable**
 ```bash
-# Generate private key
-openssl genrsa -out server.key 2048
-
-# Generate certificate signing request
-openssl req -new -key server.key -out server.csr \
-  -subj "/CN=your-domain.com/O=Your Organization/C=US"
-
-# Generate self-signed certificate (valid 365 days)
-openssl x509 -req -days 365 -in server.csr \
-  -signkey server.key -out server.crt
-
-# Verify certificate
-openssl x509 -in server.crt -text -noout
+export HEALTH_PORT=8080
 ```
 
-**For Production (CA-Signed Certificate):**
+**Option 2: config.properties**
+```properties
+# Health Check Port (plaintext, no TLS)
+HEALTH_PORT=8080
+```
 
-1. Purchase a certificate from a trusted Certificate Authority (Let's Encrypt, DigiCert, etc.)
-2. Generate a Certificate Signing Request (CSR) with your production domain
-3. Submit CSR to CA for signing
-4. Install the signed certificate and intermediate chain
-5. Configure paths in environment variables or config.properties
+**Why Separate Health Check Port?**
+- ✅ No certificate required for health checks
+- ✅ Simpler for load balancers and monitoring tools
+- ✅ No authentication required
+- ✅ Main audio services remain TLS-protected on port 8086
+
+#### Obtaining TLS Certificates
+
+**IMPORTANT:** Webex Orchestrator **does not accept self-signed certificates**. You must use a certificate signed by a trusted Certificate Authority.
+
+**Option 1: Let's Encrypt (Free, Recommended for Most Deployments)**
+
+Let's Encrypt provides free, automated certificates that are trusted by all major platforms:
+
+```bash
+# Install certbot
+sudo apt-get install certbot  # Ubuntu/Debian
+brew install certbot          # macOS
+
+# Generate certificate for your domain
+sudo certbot certonly --standalone -d your-domain.com
+
+# Certificates will be saved to:
+# Certificate: /etc/letsencrypt/live/your-domain.com/fullchain.pem
+# Private Key: /etc/letsencrypt/live/your-domain.com/privkey.pem
+
+# Set up auto-renewal (certificates expire every 90 days)
+sudo certbot renew --dry-run
+```
+
+**Option 2: Commercial Certificate Authority**
+
+1. **Generate Certificate Signing Request (CSR):**
+   ```bash
+   # Generate private key
+   openssl genrsa -out server.key 2048
+   
+   # Generate CSR
+   openssl req -new -key server.key -out server.csr \
+     -subj "/CN=your-domain.com/O=Your Organization/C=US"
+   ```
+
+2. **Purchase certificate** from a trusted CA (DigiCert, Sectigo, GlobalSign, etc.)
+3. **Submit CSR** to the CA for signing
+4. **Download signed certificate** and intermediate chain from CA
+5. **Install certificate** on your server
+6. **Configure paths** in environment variables or config.properties
 
 **For Google Cloud Run:**
 
@@ -444,21 +883,25 @@ Google Cloud Run automatically provides TLS termination, so you don't need to co
 
 #### Server Behavior
 
-**With TLS Configured:**
+**With TLS Configured (Production):**
 ```
-✓ Secure gRPC server started at port : 8086 with TLS/SSL encryption
+INFO: Main server port: 8086, Health check port: 8080
+INFO: ✓ Health check server started at port : 8080 (plaintext, no authentication required)
+INFO: TLS enabled - Certificate: /path/to/cert.pem, Key: /path/to/key.pem
+INFO: ✓ Secure gRPC server started at port : 8086 with TLS/SSL encryption
 ```
-- All traffic is encrypted with TLS 1.2+
-- Authentication tokens are protected
-- Audio data is encrypted in transit
+- Main server (8086): TLS-protected, authentication required
+- Health check server (8080): Plaintext, no authentication
+- Audio data encrypted in transit
 - Production-ready security
 
 **Without TLS (Development Only):**
 ```
-⚠️  WARNING: TLS is NOT configured! Server will run WITHOUT encryption.
-⚠️  This is a SECURITY RISK and should ONLY be used for local development.
-⚠️  Set TLS_CERT_PATH and TLS_KEY_PATH environment variables or config.properties to enable TLS.
-server started at port : 8086 (UNENCRYPTED)
+INFO: Main server port: 8086, Health check port: 8080
+INFO: ✓ Health check server started at port : 8080 (plaintext, no authentication required)
+WARN: ⚠️  WARNING: TLS is NOT configured! Main server will run WITHOUT encryption.
+WARN: ⚠️  This is a SECURITY RISK and should ONLY be used for local development.
+INFO: server started at port : 8086 (UNENCRYPTED)
 ```
 
 #### Testing TLS Configuration
@@ -466,14 +909,20 @@ server started at port : 8086 (UNENCRYPTED)
 After configuring TLS, verify it's working:
 
 ```bash
-# Test TLS handshake
+# Test TLS handshake on main server (port 8086)
 openssl s_client -connect your-domain.com:8086 -showcerts
 
-# Test gRPC health check over TLS
-grpcurl -insecure -d '{}' your-domain.com:8086 com.cisco.wcc.ccai.v1.Health/Check
+# Verify certificate chain is valid
+openssl s_client -connect your-domain.com:8086 -CAfile /etc/ssl/certs/ca-certificates.crt
+
+# Test health check (no TLS, port 8080)
+grpcurl -plaintext -d '{}' your-domain.com:8080 com.cisco.wcc.ccai.v1.Health/Check
 ```
 
-**Note:** The `-insecure` flag is only for testing with self-signed certificates. Production should use properly signed certificates.
+**Important:** 
+- If `openssl s_client` shows certificate verification errors on port 8086, Webex Orchestrator will also reject the connection
+- Health checks on port 8080 do not require TLS and are always accessible
+- Load balancers should use port 8080 for health checks to avoid certificate complexity
 
 #### Important Security Notes
 
@@ -497,18 +946,19 @@ mvn exec:java -Dexec.mainClass="com.cisco.wccai.grpc.server.GrpcServer"
 
 **With TLS Configured (Production-Ready):**
 ```
+INFO: Main server port: 8086, Health check port: 8080
+INFO: ✓ Health check server started at port : 8080 (plaintext, no authentication required)
 INFO: TLS enabled - Certificate: /path/to/server.crt, Key: /path/to/server.key
 INFO: ✓ Secure gRPC server started at port : 8086 with TLS/SSL encryption
-INFO: Initializing the context
 ```
 
 **Without TLS (Development Only):**
 ```
-WARN: ⚠️  WARNING: TLS is NOT configured! Server will run WITHOUT encryption.
+INFO: Main server port: 8086, Health check port: 8080
+INFO: ✓ Health check server started at port : 8080 (plaintext, no authentication required)
+WARN: ⚠️  WARNING: TLS is NOT configured! Main server will run WITHOUT encryption.
 WARN: ⚠️  This is a SECURITY RISK and should ONLY be used for local development.
-WARN: ⚠️  Set TLS_CERT_PATH and TLS_KEY_PATH environment variables or config.properties to enable TLS.
 INFO: server started at port : 8086 (UNENCRYPTED)
-INFO: Initializing the context
 ```
 
 **Test the Server Locally:**
@@ -524,23 +974,34 @@ brew install grpcurl
 apt-get install grpcurl  # or yum install grpcurl
 ```
 
-**Testing with TLS Enabled:**
+**Testing Health Check (No Certificate Required):**
 ```bash
-# List available services (use -insecure for self-signed certificates)
-grpcurl -insecure :8086 list
+# Health check on port 8080 (plaintext, always works)
+grpcurl -plaintext -d '{}' :8080 com.cisco.wcc.ccai.v1.Health/Check
 
-# Test the health endpoint
-grpcurl -insecure -d '{}' :8086 com.cisco.wcc.ccai.v1.Health/Check
+# List services on health check port
+grpcurl -plaintext :8080 list
 ```
 
-**Testing without TLS (Development Only):**
+**Testing Main Server with TLS:**
 ```bash
-# List available services
+# List available services on main server (requires CA-signed certificate)
+grpcurl :8086 list
+
+# Main server services require authentication
+grpcurl :8086 com.cisco.wcc.ccai.media.v1.ConversationAudio/StreamConversationAudio
+```
+
+**Local Testing (Development Only):**
+```bash
+# For local development testing only - NOT for Webex integration
 grpcurl -plaintext :8086 list
-
-# Test the health endpoint
-grpcurl -plaintext -d '{}' :8086 com.cisco.wcc.ccai.v1.Health/Check
 ```
+
+**Note:** 
+- Health checks always use port 8080 (plaintext, no certificate)
+- Main audio services use port 8086 (TLS with CA-signed certificate required for production)
+- Load balancers should use port 8080 for health checks
 
 **Expected Response:**
 ```json
@@ -549,7 +1010,7 @@ grpcurl -plaintext -d '{}' :8086 com.cisco.wcc.ccai.v1.Health/Check
 }
 ```
 
-**Note:** The health check endpoint does not require authentication for local testing. It's designed to be accessible for monitoring and verification purposes. The `-insecure` flag is only needed when using self-signed certificates for development/testing.
+**Note:** The health check endpoint does not require authentication for local testing. It's designed to be accessible for monitoring and verification purposes.
 
 **Stopping the Server:**
 
